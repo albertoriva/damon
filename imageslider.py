@@ -1,3 +1,11 @@
+###################################################
+#
+# (c) 2016, Alberto Riva, ariva@ufl.edu
+# DiBiG, ICBR Bioinformatics, University of Florida
+#
+# See the LICENSE file for license information.
+###################################################
+
 # A class to generate a slider for multiple images.
 # Two subclasses are provided: VerticalSlider and HorizontalSlider
 #

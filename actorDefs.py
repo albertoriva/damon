@@ -6,6 +6,8 @@
 # See the LICENSE file for license information.
 ###################################################
 
+from datetime import date, datetime
+from tempfile import mkstemp
 import os
 import os.path
 import sys
@@ -14,18 +16,87 @@ import glob
 import time
 import shutil
 import subprocess
-from datetime import date, datetime
-from tempfile import mkstemp
-
 import ConfigParser
-import imageslider
 
 # Globals
 
 actCopyright = "&copy; " + str(date.today().year) + ", <A href='mailto:ariva@ufl.edu'>A. Riva</A>, University of Florida."
+#submitCmd = "submit.py"
 submitCmd = "submit"
+excludeFile = ".exclude"
 
-# Internal utilities (not really meant for users)
+# Utils
+
+def message(string, *args):
+    # Write `string' to standard error. `args' are 
+    # inserted into `string' with format.
+    sys.stderr.write(string.format(*args))
+    sys.stderr.write("\n")
+
+def fullname(pathname):
+    # Returns the filename part of `pathname'
+    # *** This is the same as os.path.basename()
+    return os.path.split(pathname)[1]
+
+def fileDetails(pathname):
+    # Returns a tuple containing file extension and size of the
+    # file pointed to by `pathname'
+    ext = os.path.splitext(pathname)[1]
+    ext = ext[1:]
+    return (ext, os.path.getsize(pathname))
+
+def printBytes(b):
+    # Return a string containing the number b formatted as a number of 
+    # bytes, or kilobytes, or megabytes, or gigabytes, as appropriate.
+    if b < 1024:
+        return "{} bytes".format(b)
+    b = b / 1024.0
+    if b < 1024:
+        return "{:.2f} kB".format(b)
+    b = b / 1024.0
+    if b < 1024:
+        return "{:.2f} MB".format(b)
+    b = b / 1024.0
+    return "{:.2f} GB".format(b)
+
+def timeStamp():
+    dt = datetime.now()
+    return "{}-{}-{}@{}:{:0>2}".format(dt.month, dt.day, dt.year, dt.hour, dt.minute)
+
+def dateAndTime():
+    dt = datetime.now()
+    return "{}/{}/{} {}:{:0>2}:{:0>2}".format(dt.month, dt.day, dt.year, dt.hour, dt.minute, dt.second)
+
+def subprocOutput(command):
+    # Execute `command', return the command's output.
+    # `command' can be a string or a list in which the first
+    # element is the command name and remaining elements are arguments.
+    # The end-of-line character at the end of the last line of output
+    # is removed automatically.
+    # NOTE: signals an error if the command returns a non-zero return code.
+    return subprocess.check_output(command.split(" ")).rstrip("\n")
+
+# Support for tables
+
+def decodeAlign(align, i):
+    """Decodes the character at position `i' in an align string `align' into the corresponding CSS style (for tables). If `align' is None, assume L at each position."""
+    al = {'L': 'aleft', 'R': 'aright', 'C': 'acenter', 'H': 'aheader'}
+    if align == None:
+        return al['L']
+    else:
+        return al[align[i]];
+    
+def decodeAlignNew(align, i):
+    al = {'L': "<TD class='{} aleft'>{}</TD>",
+          'R': "<TD class='{} aright'>{}</TD>",
+          'C': "<TD class='{} acenter'>{}</TD>",
+          'H': "<TD class='{} aheder'>{}</TD>",
+          'N': "<TD class='{} aright'>{:,}</TD>",
+          'F': "<TD class='{} aright'>{:.3f}</TD>"}
+    if align == None:
+        return al['L']
+    else:
+        return al[align[i]]
 
 # Helper classes for the wait() command
 # Each waiter has a success() method that returns True
@@ -88,25 +159,9 @@ the pattern in `filename' is greater than or equal to `wanted'."""
         for f in glob.glob(self.filename):
             os.remove(f)
 
-class ActorError(Exception):
-    step = False
+# Script class
 
-class FileError(ActorError):
-    filename = ""
-    
-    def __init__(self, filename, step=False):
-        self.filename = filename
-        self.step = step
-
-    def __str__(self):
-        if self.step:
-            return "Error in step {}: file {} does not exist or is not readable.".format(self.step, self.filename)
-        else:
-            return "Error file {} does not exist or is not readable.".format(self.filename)
-
-# Main class
-
-class Actor():
+class Script:
     Name = "run"
     Title = "Script"
     Project = "(no name)"
@@ -114,21 +169,14 @@ class Actor():
     Fields = {}
     Arguments = []
     Include = []                 # List of additional files to be copied in run directory
-    Conf = None                  # ConfigParser object
-    Steps = []                   # Steps the user wants to run
-    Prefix = None                # Prefix for submit jobs
-
     # Runtime
     source = ""                  # Name of file containing script
-    configFile = None            # Name of configuration file
-    excludeFile = ".exclude"     # Exclude list for Zip file
     tempfiles = []               # List of temporary files
     dir = ""                     # Output directory
     out = False                  # Output stream
-    sceneIdx = 0                    # Number of current scene
     inScene = False              # Are we inside a scene?
     previousDir = ""             # Directory before starting execution
-    notifiedSteps = []
+    conf = None                  # ConfigParser object
 
     # Internal methods (not meant to be called by user)
 
@@ -137,6 +185,7 @@ class Actor():
         self.Arguments = []
         self.tempfiles = []
         self.previousDir = ""
+        self.Include = ['/apps/dibig_tools/1.0/lib/img/UF-ICBR-logo.png']
 
     def _cleanup(self):
 
@@ -152,178 +201,28 @@ class Actor():
         # Return to parent directory
         if self.previousDir != "":
             os.chdir(self.previousDir)
-            self.message("Current directory now: {}", os.getcwd())
+            message("Current directory now: {}", os.getcwd())
 
     def _addToExclude(self, filename):
-        with open(self.excludeFile, "a") as out:
+        global excludeFile
+        with open(excludeFile, "a") as out:
             out.write("{}/{}\n".format(self.Name, filename))
         return filename
 
-    def _subprocOutput(self, command):
-        # Execute `command', return the command's output.
-        # `command' can be a string or a list in which the first
-        # element is the command name and remaining elements are arguments.
-        # The end-of-line character at the end of the last line of output
-        # is removed automatically.
-        # NOTE: signals an error if the command returns a non-zero return code.
-        return subprocess.check_output(command.split(" ")).rstrip("\n")
-
-    def _decodeAlign(self, align, i):
-        """Decodes the character at position `i' in an align string `align' into the corresponding CSS style (for tables). If `align' is None, assume L at each position."""
-        al = {'L': "<TD class='{} aleft'>{}</TD>",
-              'R': "<TD class='{} aright'>{}</TD>",
-              'C': "<TD class='{} acenter'>{}</TD>",
-              'H': "<TD class='{} aheader'>{}</TD>",
-              'N': "<TD class='{} aright'>{:,}</TD>",
-              'F': "<TD class='{} aright'>{:.3f}</TD>"}
-        if align == None:
-            return al['L']
-        else:
-            return al[align[i]]
-
-# Utils
-    def message(self, string, *args):
-        # Write `string' to standard error. `args' are 
-        # inserted into `string' with format.
-        sys.stderr.write(string.format(*args))
-        sys.stderr.write("\n")
-
-    def fullname(self, pathname):
-        # Returns the filename part of `pathname'
-        # *** This is the same as os.path.basename()
-        return os.path.split(pathname)[1]
-
-    def fileLink(self, filename, label):
-        if os.path.isfile(filename):
-            return "<B>{}</B> <A href='{}' target='_blank'>{}</A>".format(label, filename, self.fullname(filename))
-        else:
-            return ""
-
-    def fileDetails(self, pathname):
-        # Returns a tuple containing file extension and size of the
-        # file pointed to by `pathname'
-        ext = os.path.splitext(pathname)[1]
-        ext = ext[1:]
-        return (ext, os.path.getsize(pathname))
-
-    def printBytes(self, b):
-        # Return a string containing the number b formatted as a number of 
-        # bytes, or kilobytes, or megabytes, or gigabytes, as appropriate.
-        if b < 1024:
-            return "{} bytes".format(b)
-        b = b / 1024.0
-        if b < 1024:
-            return "{:.2f} kB".format(b)
-        b = b / 1024.0
-        if b < 1024:
-            return "{:.2f} MB".format(b)
-        b = b / 1024.0
-        return "{:.2f} GB".format(b)
-
-    def timeStamp(self):
-        dt = datetime.now()
-        return "{}-{}-{}@{}:{:0>2}".format(dt.month, dt.day, dt.year, dt.hour, dt.minute)
-
-    def dateAndTime(self):
-        dt = datetime.now()
-        return "{}/{}/{} {}:{:0>2}:{:0>2}".format(dt.month, dt.day, dt.year, dt.hour, dt.minute, dt.second)
-
-### Support for files and pathnames
-
-    def linkify(self, url, name=False):
-        if not name:
-            name = url
-        return "<A href='{}'>{}</A>".format(url, name)
-
-    def fixPath(self, path):
-        """Add ../ in front of `path' unless it is absolute."""
-        if path[0] == "/":
-            return path
-        else:
-            return "../" + path
-
-    def checkPath(self, p, step=False):
-        """Checks that the file indicated by pathname p exists and is readable.
-Returns fixPath(p) if successful, signals an error otherwise."""
-        if p == None:
-            return p
-        elif not os.path.isfile(p):
-            raise FileError(p)
-        else:
-            return self.fixPath(p)
-
-    def checkFile(self, p, step=False):
-        """Checks that the file indicated by pathname p exists and is readable.
-Returns True if successful, signals an error otherwise."""
-        if os.path.isfile(p):
-            return True
-        else:
-            if step:
-                msg = "Error in {} step: file {} does not exist.\n".format(step, p)
-            else:
-                msg = "Error: file {} does not exist.\n".format(p)
-            raise FileError(p, step)
-
-# Support for configuration files
-
     def loadConfiguration(self, filename):
-        """Load configuration file `filename'."""
         if os.path.isfile(filename):
-            self.configFile = filename
-            self.Conf = ConfigParser.ConfigParser()
-            self.Conf.read(filename)
-            return self.Conf
+            self.conf = ConfigParser.ConfigParser()
+            self.conf.read(filename)
+            return self.conf
         else:
             print "Error: configuration file {} not found or not readable.".format(filename)
             exit(1)
 
-    def getConf(self, entry, section="General", default=None):
-        """Return the value for `entry' in `section', if present, or the
-value of default (None if unspecified). `section' defaults to General."""
+    def getConf(self, entry, section="General"):
         try:
-            if self.Conf.has_section(section):
-                return self.Conf.get(section, entry)
-            else:
-                return default
+            return self.conf.get(section, entry)
         except ConfigParser.NoOptionError:
-            return default
-
-    def getConfBoolean(self, entry, section="General", default=None):
-        """Return the boolean value for `entry' in `section', if present, or the
-value of default (None if unspecified). `section' defaults to General."""
-        try:
-            return self.Conf.getboolean(section, entry)
-        except ConfigParser.NoOptionError:
-            return default
-
-# Support for enabling/disabling steps
-
-    def setSteps(self, steplist):
-        """Set the list of steps to be performed by this actor to `steplist'. Steplist
-can be either a list of strings or a string containing comma-separated step names (e.g.
-"step1, step2, step3". Use the step() method to know if a step should be executed."""
-        if type(steplist).__name__ == 'str':
-            steplist = [ i.strip(" ") for i in steplist.split(",") ]
-        self.Steps = steplist
-        self.notifiedSteps = []
-
-    def stepPresent(self, step):
-        return (step in self.Steps) or ("-"+step in self.Steps) or ("no"+step in self.Steps)
-
-    def stepDry(self, step):
-        return ("-"+step in self.Steps) or ("no"+step in self.Steps)
-
-    def step(self, wanted):
-        if wanted in self.Steps:
-            if not wanted in self.notifiedSteps: # should we notify?
-                print "Performing step `{}'.".format(wanted)
-                self.notifiedSteps.append(wanted)
-            return True
-        else:
-            if not wanted in self.notifiedSteps:
-                print "Skipping step `{}'.".format(wanted)
-                self.notifiedSteps.append(wanted)
-            return False
+            return None
 
     # Actor definitions (should normally NOT be overwritten)
 
@@ -374,24 +273,6 @@ can be either a list of strings or a string containing comma-separated step name
         f = os.fdopen(fdata[0], "w")
         self.tempfiles.append([fdata[0], fdata[1], f])
         return f
-
-    def missingOrStale(self, filename, other=False, warn=False):
-        """Returns true if `filename' is missing or (when `other' is specified) older than `other'."""
-        if not os.path.isfile(filename):
-            if warn:
-                sys.stderr.write("File `{}' does not exist or is not readable.".format(filename))
-            return True             # missing                                                                                                                            
-        elif other and os.path.isfile(other):
-            this = os.path.getmtime(filename)
-            that = os.path.getmtime(other)
-            if this < that:
-                if warn:
-                    sys.stderr.write("File `{}' is older than file `{}'.".format(filename, other))
-                return True
-            else:
-                return False
-        else:
-            return False
     
     def mkdir(self, name):
         if not os.path.exists(name):
@@ -413,14 +294,14 @@ can be either a list of strings or a string containing comma-separated step name
                 return CounterWaiter(filename, cnt)
 
     def wait(self, wanted, delete=True):
-        """Wait until all the files in the `wanted' list get created. Returns True when all specified files exist. This can be used to check for the completion of a background script. If `delete' is True, the files are deleted before returning."""
+        """Wait until all the files in the `wanted' list get created. Returns when all specified files exist. This can be used to check for the completion of a background script. If `delete' is True, the files are deleted before returning."""
 
         # If a single filename was passed, turn it into a list
         if type(wanted).__name__ != 'list':
             wanted = [wanted]
 
         wanted = [ self._parseWait(w) for w in wanted ]
-        self.message("Waiting for: " + ", ".join([ w.str() for w in wanted]))
+        message("Waiting for: " + ", ".join([ w.str() for w in wanted]))
         while wanted != []:
             for w in wanted:
                 success = w.success()
@@ -428,16 +309,14 @@ can be either a list of strings or a string containing comma-separated step name
                     if delete:
                         w.delete()
                     wanted.remove(w)
-                    self.message("Waiting for: " + ", ".join([ w.str() for w in wanted]))
-            if wanted != []:
-                time.sleep(1)
-        return True
+                    message("Waiting for: " + ", ".join([ w.str() for w in wanted]))
+            time.sleep(1)
 
     def copy(self, filename, dest="", exclude=False):
         """Copy `filename' to the current directory. The filename is preserved unless `dest' is specified, in which case it is used as the new filename."""
         if dest == "":
-            dest = self.fullname(filename)
-        self.message("Copying `{}' to `{}'", filename, dest)
+            dest = fullname(filename)
+        message("Copying `{}' to `{}'", filename, dest)
         shutil.copyfile(filename, dest)
         if exclude:
             self._addToExclude(filename)
@@ -445,7 +324,7 @@ can be either a list of strings or a string containing comma-separated step name
         return dest
 
     def setFileExt(self, pathname, extension, remove=False):
-        """Change the extension of `pathname' to `extension'. If `remove' is specified, removes all extensions that are contained in that list."""
+        """Change the extension of `pathname' to `extension'."""
         if remove:
             while True:
                 if pathname.find(".") == -1:
@@ -460,46 +339,61 @@ can be either a list of strings or a string containing comma-separated step name
             (root, ext) = os.path.splitext(pathname)
             return root + extension
 
+    def missingOrStale(self, filename, other=False, warn=False):
+        """Returns true if `filename' is missing or (when `other' is specified) older than `other'."""
+        if not os.path.isfile(filename):
+            if warn:
+                sys.stderr.write("File `{}' does not exist or is not readable.\n".format(filename))
+            return True             # missing
+        elif other and os.path.isfile(other):
+            this = os.path.getmtime(filename)
+            that = os.path.getmtime(other)
+            if this < that:
+                if warn:
+                    sys.stderr.write("File `{}' is older than file `{}'.\n".format(filename, other))
+                return True
+            else:
+                return False
+        else:
+            return False
+
     def delete(self, pattern):
         """Delete files matching `pattern' in the current directory."""
-        self.message("Deleting: {}", pattern)
+        message("Deleting: {}", pattern)
         subprocess.call("rm " + pattern, shell=True)
 
-    def begin(self, timestamp=False, copyScript=False, copyConf=True, html="index.html"):
-        """Start execution of the script. Creates a directory where result files will be written, and chdirs to it. If `timestamp' is True, the directory name contains the current timestamp. If `copyScript' is True, the script is copied to the results directory. If copyConf is True, the configuration file is copied to the results directory. The report is written to the HTML file specified by `html'."""
+    def begin(self, timestamp=True, copyScript=True, html="index.html"):
+        """Start execution of the script. Creates a directory where result files will be written, and chdirs to it. If `timestamp' is True, the directory name contains the current timestamp. If `copyScript' is True, the script is copied to the results directory. The report is written to the HTML file specified by `html'."""
 
         if timestamp:
-            ts = self.timeStamp()
+            ts = timeStamp()
             dirPath = "{}-{}/".format(self.Name, ts)
         else:
             dirPath = self.Name + "/"
 
-        self.message("Creating output directory: {}", dirPath)
+        message("Creating output directory: {}", dirPath)
         if not os.path.exists(dirPath):
             os.makedirs(dirPath)
 
         self.dir = dirPath
 
         filePath = dirPath + "/" + html
-        scriptPath = dirPath + "/" + self.fullname(self.source)
+        scriptPath = dirPath + "/" + fullname(self.source)
         
         self.out = open(filePath, "w")
 
         if copyScript:
             shutil.copyfile(self.source, scriptPath)
-        if copyConf and self.configFile:
-            shutil.copyfile(self.configFile, scriptPath)
         self.previousDir = os.getcwd()
         os.chdir(dirPath)
-        self.message("Current directory now: {}", dirPath)
+        message("Current directory now: {}", dirPath)
         for inc in self.Include:
             shutil.copy(inc, ".")
         self.preamble(self.out)
 
-    def scene(self, title, timestamp=False):
-        """Open a new scene with title `title'."""
-        self.sceneIdx += 1
-        self.new_scene(self.out, self.sceneIdx, title, timestamp)
+    def scene(self, idx, title, timestamp=False):
+        """Open a new scene with index `idx' and title `title'."""
+        self.new_scene(self.out, idx, title, timestamp)
 
     def reportf(self, text, *args):
         """Add `text' to the current scene in the report. The arguments `args', if present, are inserted into `text' using format."""
@@ -548,8 +442,7 @@ can be either a list of strings or a string containing comma-separated step name
             s.write("<TR class='{}'>".format('odd' if odd else 'even'))
             idx = 0
             for v in row:
-                cell = self._decodeAlign(align, idx).format(className, str(v))
-                s.write(cell)
+                s.write("<TD class='{} {}'>{}</TD>".format(className, decodeAlign(align, idx), str(v)))
                 idx = idx + 1
             s.write("</TR>\n")
         s.write("</TABLE>\n</CENTER><BR>\n")
@@ -567,8 +460,8 @@ can be either a list of strings or a string containing comma-separated step name
             s.write("<CENTER><TABLE class='figure'><TR><TD class='figure' align='center'>\n")
             s.write("<A href='{}' target='external'><IMG src='{}' height='{}' border='1'></A>\n".format(filename, src, thumbsize))
             if details:
-                fd = self.fileDetails(filename)
-                s.write("<br>({} format, {})\n".format(fd[0], self.printBytes(fd[1])))
+                fd = fileDetails(filename)
+                s.write("<br>({} format, {})\n".format(fd[0], printBytes(fd[1])))
             if description:
                 s.write("<br><i>{}</i>\n".format(description))
             s.write("</TD></TR></TABLE></CENTER><BR>\n")
@@ -577,10 +470,10 @@ can be either a list of strings or a string containing comma-separated step name
         """Insert a box to download file `filename'. `description' is optional text describing the file. File details (format and size) are added automatically."""
         if os.path.isfile(filename):
             s = self.out
-            fd = self.fileDetails(filename)
+            fd = fileDetails(filename)
             s.write("<CENTER><TABLE class='figure'><TR><TD class='figure'>\n")
             s.write("<b>File:</b> <A href='{}' target='external'>{}</A>\n".format(filename, filename))
-            s.write("<br><b>Size:</b> {}\n".format(self.printBytes(fd[1])))
+            s.write("<br><b>Size:</b> {}\n".format(printBytes(fd[1])))
             if description:
                 s.write("<br><b>Description:</b> <i>{}</i>\n".format(description))
             s.write("</TD></TR></TABLE></CENTER><BR>\n")
@@ -597,56 +490,90 @@ can be either a list of strings or a string containing comma-separated step name
     def execute(self, *strings):
         """Execute the command line represented by `strings', returning the output of the command."""
         cmd = " ".join([str(f) for f in strings])
-        self.message("Executing: {}", cmd)
-        return self._subprocOutput(cmd)
+        message("Executing: {}", cmd)
+        return subprocOutput(cmd)
 
     def executef(self, command, *args):
         """Like execute(), but the command line is created by applying `args' to `command' using format()."""
         cmd = command.format(*args)
-        self.message("Executing: {}", cmd)
-        return self._subprocOutput(cmd)
+        message("Executing: {}", cmd)
+        return subprocOutput(cmd)
 
     def shell(self, command, *args):
         """Like executef(), but allows multiple commands, redirection, piping, etc (runs a subshell).
 Returns the command's output without the trailing \n."""
         cmd = command.format(*args)
-        self.message("Executing: {}", cmd)
+        message("Executing: {}", cmd)
         try:
             return subprocess.check_output(cmd, shell=True).rstrip("\n")
         except subprocess.CalledProcessError as cpe:
             return cpe.output.rstrip("\n")
 
-    def submit(self, scriptAndArgs, after=False, done=False, prefix=None):
+    def submit(self, scriptAndArgs, after=False, done=False):
         """Submit a script to the SGE queue with the submit command. `scriptAndArgs' is a string containing the qsub script that should be submitted and its arguments. If `after' is specified, schedule this job to run after the one whose jobid is the value of `after'. If `done' is a filename, the script will create an empty file with that name when done (use this in conjunction with the wait() method). Returns the jobid of the submitted job."""
         cmdline = submitCmd
         if after:
             cmdline = cmdline + " -after " + after
         if done:
             cmdline = cmdline + " -done " + done
-        if prefix == None:
-            prefix = self.Prefix
-        if prefix != None:
-            cmdline = cmdline + " -p " + prefix
         cmdline = cmdline + " " + scriptAndArgs
         return self.execute(cmdline)
 
-# Support for image sliders
+    # DNA sequences printing
 
-    def imgSlider(self, slides, mode='v'):
-        """Create an image slider for the specified `slides', which should be a list
-of tuples (name, url). `mode' can be 'v', for a vertical slider (default) or 'h' for
-a horizontal one."""
-        s = self.out
-        if mode == 'v':
-            ims = imageslider.VerticalSlider(slides)
+    def DNA_header(self, s, width):
+        s.write("{:8}1".format(""))
+        for i in range(2, width+1):
+            if i % 10 == 0:
+                s.write(str(i))
+            elif (i + 1) % 10 == 0:
+                pass
+            else:
+                s.write(" ")
+        s.write("\n{:8}|".format(""))
+        for i in range(2, width+1):
+            if i % 10 == 0:
+                s.write("|")
+            else:
+                s.write(" ")
+        s.write("\n")
+
+    def DNA_complement(self, b):
+        base_complements = {"A": "T", "C": "G", "G": "C", "T": "A", "a": "t", "c": "g", "g": "c", "t": "a"}
+        if b in base_complements:
+            return base_complements[b]
         else:
-            ims = imageslider.HorizontalSlider(slides)
-        ims.generate(s)
+            return b
+
+    def DNA(self, seq, name=False, description=False, rc=False, offset=1, width=60):
+        """Print DNA sequence `seq' to the report in FASTA format. Sequences are formatted to `width' characters per line, and numbered starting at `offset'. `name' and `description' are printed before the sequence, if specified. If `rc' is True, prints the complement sequence under each line."""
+        s = self.out
+        pos = offset
+
+        s.write("<CENTER><TABLE class='figure'><TR><TD class='figure'>\n")
+        if name:
+            s.write("<b>Name:</b> {}<br>\n".format(name))
+        s.write("<b>Length:</b> {}bp<br>\n".format(len(seq)))
+        s.write("<pre>\n")
+        self.DNA_header(s, width)
+        s.write("{:>7} ".format(pos))
+        for i in range(len(seq)):
+            # highlighting not implemented yet...
+            s.write(seq[i])
+            pos = pos + 1
+            if ((i + 1) % width) == 0:
+                if rc:
+                    rcpos = pos - width
+                    s.write("{:>8}".format(""))
+                    for j in range(i-width, i):
+                        s.write(base_complement(seq[j]))
+                    s.write("\n")
+                s.write("\n{:>7} ".format(pos))
+        s.write("</pre></TD></TR></TABLE></CENTER>\n")
 
 # Style methods (can be overridden in subclasses)
 
     def css(self):
-        """Returns the CSS for the output page."""
         return """BODY {
   background: lightgrey;
   font-family: arial;
@@ -742,19 +669,10 @@ H2 {
   color: #10337A;
   font-size: 24pt;
 }
-.upreg {
-  color: red;
-}
-.dnreg {
-  color: green;
-}
-
 """
-    
+
     def preamble(self, out):
-        "Writes the top part of the HTML output page (from beginning to end of the first box) to output stream `out'."""
-        src = self.fileLink(self.source, "Script")
-        conf = self.fileLink(self.configFile, "Configuration")
+        src = fullname(self.source)
         out.write("""
 <!DOCTYPE html>
 <html>
@@ -763,7 +681,6 @@ H2 {
     <style type='text/css'>
 {}
     </style>
-{}
   </head>
   <body>
 {}
@@ -777,34 +694,28 @@ H2 {
             <b>Started on:</b> {}<br>
             <b>Hostname:</b> {}<br>
             <b>Run directory:</b> {}<br>
-{}
-{}
+            <b>Source:</b> <A href='{}' target='_blank'>{}</A>
           </td>
         </tr>
-""".format(self.Title, self.css(), self.headExtra(), self.header(), self.Title, self.Name, self.Project, self.dateAndTime(), self._subprocOutput("hostname"), os.getcwd(), src, conf))
-
-    def headExtra(self):
-        """Returns additional tags for the <HEAD> section."""
-        return ""
+""".format(self.Title, self.css(), self.header(), self.Title, self.Name, self.Project, dateAndTime(), subprocOutput("hostname"), os.getcwd(), src, src))
 
     def header(self):
-        """Returns the header part of the HTML report (called by preamble)."""
-        return ""
-
-    def new_scene(self, out, idx, title, timestamp=False):
-        """Writes code to open a new scene to output stream `out'."""
-        if self.inScene:
-            if timestamp:
-                out.write("<BR><BR>Completed: <b>{}</b>".format(self.timeStamp()))
-            out.write("</TD></TR>\n")
-        self.inScene = True
-        out.write("\n<TR><TD class='main'><big>{}. {}</big><BR>\n".format(idx, title))
+        return """<table class='hdr'>
+      <tr><td align='left'><A href='http://biotech.ufl.edu/'><img src='UF-ICBR-logo.png' border='0'></A></td><td align='right'><A class='dibig' href='http://dibig.biotech.ufl.edu'>DiBiG</A></td></tr>
+      <tr><th class='hdr' align='left'>ICBR Bioinformatics</th><th class='hdr' align='right'><i>Powered by Actor, v1.0</i><tr>
+    </table>"""
 
     def postamble(self, out):
-        """Writes the final part of the HTML report to output stream `out'."""
         if self.inScene:
-            out.write("<BR><BR>Completed: <b>{}</b>".format(self.timeStamp()))
+            out.write("<BR><BR>Completed: <b>{}</b>".format(timeStamp()))
             out.write("</TD></TR>\n")
         out.write("\n<TR><TD class='main'><small>{}</small></TD></TR>\n".format(self.Copyright))
         out.write("\n    </table>\n  </body>\n</html>\n")
 
+    def new_scene(self, out, idx, title, timestamp):
+        if self.inScene:
+            if timestamp:
+                out.write("<BR><BR>Completed: <b>{}</b>".format(timeStamp()))
+            out.write("</TD></TR>\n")
+        self.inScene = True
+        out.write("\n<TR><TD class='main'><big>{}. {}</big><BR>\n".format(idx, title))

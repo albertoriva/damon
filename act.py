@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 
-# from actorDefs import Script
+###################################################
+#
+# (c) 2016, Alberto Riva, ariva@ufl.edu
+# DiBiG, ICBR Bioinformatics, University of Florida
+#
+# See the LICENSE file for license information.
+###################################################
 
 import sys
 import os.path

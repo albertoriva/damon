@@ -1,4 +1,10 @@
-# (c) 2016, A. Riva, DiBiG, ICBR Bioinformatics
+###################################################
+#
+# (c) 2016, Alberto Riva, ariva@ufl.edu
+# DiBiG, ICBR Bioinformatics, University of Florida
+#
+# See the LICENSE file for license information.
+###################################################
 
 import sys
 
