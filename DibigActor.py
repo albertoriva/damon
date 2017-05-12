@@ -7,9 +7,11 @@
 ###################################################
 
 import Actor
+from Logger import Logger
 
 class DibigActor(Actor.Actor):
     dibigpath = '/apps/dibig_tools/1.0/lib/'
+    log = Logger(None)          # To avoid errors in scripts that don't explicitly create one
 
     def __init__(self):
         self.Include = [self.dibigpath + 'img/UF-ICBR-logo.png',
@@ -19,6 +21,25 @@ class DibigActor(Actor.Actor):
                         self.dibigpath + 'js/jquery.tablescroll.js',
                         self.dibigpath + 'css/jquery.tablescroll.css']
         
+
+    def initFiles(self):
+        self.log.setLogfile(self.getConf("logfile"))
+        self.log.setEcho('stdout')
+        self.log.logStart(self.title)
+
+        ## Ensure we don't have old .done files and tmp- files lying around
+        self.shell("rm -f *.done tmp-*")
+
+        ## Initialize .files
+        self.shell('rm -f .files; echo "*.html\n*.png\n*.pdf\n*.xlsx\n*.csv\n*.css\n*.js\n*.bed\n*.bedGraph\n*.conf" > .files')
+
+    def addToZipFile(self, path):
+        with open(".files", "a") as out:
+            out.write(path + "\n")
+
+    def cleanup(self):
+        self.log.logEnd()
+        self.log.close()
 
     def headExtra(self):
         """Returns additional tags for the <HEAD> section."""

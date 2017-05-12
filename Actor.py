@@ -108,7 +108,7 @@ class FileError(ActorError):
 
 class Actor():
     Name = "run"
-    Title = "Script"
+    title = "Script"
     Project = "(no name)"
     Copyright = actCopyright
     Fields = {}
@@ -119,6 +119,7 @@ class Actor():
     Prefix = None                # Prefix for submit jobs
 
     # Runtime
+    ask = True                   # If False, run in unattendend mode
     source = ""                  # Name of file containing script
     configFile = None            # Name of configuration file
     excludeFile = ".exclude"     # Exclude list for Zip file
@@ -230,10 +231,14 @@ class Actor():
 
 ### Support for files and pathnames
 
-    def linkify(self, url, name=False):
+    def linkify(self, url, name=False, target=False):
         if not name:
             name = url
-        return "<A href='{}'>{}</A>".format(url, name)
+        if target:
+            tg = " target='{}'".format(target)
+        else:
+            tg = ""
+        return "<A href='{}'{}>{}</A>".format(url, tg, name)
 
     def fixPath(self, path):
         """Add ../ in front of `path' unless it is absolute."""
@@ -264,6 +269,15 @@ Returns True if successful, signals an error otherwise."""
                 msg = "Error: file {} does not exist.\n".format(p)
             raise FileError(p, step)
 
+    def fileLines(self, filename):
+        """Returns the number of lines in `filename' (as a string)."""
+        r = self.shell("wc -l " + filename)
+        p = r.find(" ")
+        if p > 0:
+            return r[:p]
+        else:
+            return None
+
 # Support for configuration files
 
     def loadConfiguration(self, filename):
@@ -272,6 +286,12 @@ Returns True if successful, signals an error otherwise."""
             self.configFile = filename
             self.Conf = ConfigParser.ConfigParser()
             self.Conf.read(filename)
+
+            # Set standard attributes
+            self.title = self.getConf("title")
+            self.project = self.getConf("project")
+            self.prefix = self.getConf("label")
+
             return self.Conf
         else:
             print "Error: configuration file {} not found or not readable.".format(filename)
@@ -287,6 +307,22 @@ value of default (None if unspecified). `section' defaults to General."""
                 return default
         except ConfigParser.NoOptionError:
             return default
+    
+    def getConfInt(self, entry, section="General", default=None):
+        try:
+            return int(self.Conf.get(section, entry))
+        except ConfigParser.NoOptionError:
+            return default
+        except ValueError:
+            return default
+
+    def getConfFloat(self, entry, section="General", default=None):
+        try:
+            return float(self.Conf.get(section, entry))
+        except ConfigParser.NoOptionError:
+            return default
+        except ValueError:
+            return default
 
     def getConfBoolean(self, entry, section="General", default=None):
         """Return the boolean value for `entry' in `section', if present, or the
@@ -295,6 +331,22 @@ value of default (None if unspecified). `section' defaults to General."""
             return self.Conf.getboolean(section, entry)
         except ConfigParser.NoOptionError:
             return default
+
+    def getConfList(self, entry, section="General", default=[]):
+        """Return the value for `entry' in `section' as a comma-delimited list.
+`section' defaults to General."""
+        try:
+            a = self.Conf.get(section, entry)
+            return [ w.strip(" ") for w in a.split(",") ]
+        except ConfigParser.NoOptionError:
+            return default
+
+    def getConfAll(self, section):
+        """Returns all (key, value) pairs for the options in `section'."""
+        if self.Conf.has_section(section):
+            return self.Conf.items(section)
+        else:
+            return []
 
 # Support for enabling/disabling steps
 
@@ -333,17 +385,18 @@ can be either a list of strings or a string containing comma-separated step name
 
     def title(self, title):
         """Declare the title of this script to be `title'. The title is printed at the top of the HTML report."""
-        self.Title = title
+        self.title = title
 
     def project(self, project):
         """Declare the name of the project that this script belongs to. The project is printed in the header of the HTML report."""
         self.Project = project
 
-    def script(self, name, title, project):
+    def script(self, name, title, project=None):
         """Declare the name, title, and project for this script."""
         self.Name = name
-        self.Title = title
-        self.Project = project
+        self.title = title
+        if project:
+            self.project = project
 
     def info(self, namesVals):
         """Adds the key, value pairs in dictionary `namesVals' to the list of additional info fields for this script. Info fields are printed in the header of the HTML report."""
@@ -370,28 +423,29 @@ can be either a list of strings or a string containing comma-separated step name
 
     def tempfile(self):
         """Create and open a temporary file in the current directory. Returns the open file handle. The file is automatically deleted when execution of the script terminates."""
-        fdata = mkstemp(dir=".")
+        fdata = mkstemp(prefix='tmp', dir=".")
         f = os.fdopen(fdata[0], "w")
         self.tempfiles.append([fdata[0], fdata[1], f])
         return f
 
-    def missingOrStale(self, filename, other=False, warn=False):
-        """Returns true if `filename' is missing or (when `other' is specified) older than `other'."""
+    def missingOrStale(self, filename, other=[], warn=False):
+        """Returns true if `filename' is missing or (when `other' is specified) older than `other'.
+`Other' can be a list of filenames, in which case all of them are tested."""
+        if isinstance(other, type("str")):
+            other = [other]
         if not os.path.isfile(filename):
             if warn:
                 sys.stderr.write("File `{}' does not exist or is not readable.".format(filename))
             return True             # missing                                                                                                                            
-        elif other and os.path.isfile(other):
-            this = os.path.getmtime(filename)
-            that = os.path.getmtime(other)
-            if this < that:
-                if warn:
-                    sys.stderr.write("File `{}' is older than file `{}'.".format(filename, other))
-                return True
-            else:
-                return False
-        else:
-            return False
+        this = os.path.getmtime(filename)
+        for o in other:
+            if os.path.isfile(o):
+                that = os.path.getmtime(o)
+                if this < that:
+                    if warn:
+                        sys.stderr.write("File `{}' is older than file `{}'.".format(filename, o))
+                    return True
+        return False
     
     def mkdir(self, name):
         if not os.path.exists(name):
@@ -474,8 +528,13 @@ can be either a list of strings or a string containing comma-separated step name
         else:
             dirPath = self.Name + "/"
 
-        self.message("Creating output directory: {}", dirPath)
-        if not os.path.exists(dirPath):
+        if os.path.exists(dirPath):
+            if self.ask:
+                a = raw_input("The output directory already exists. Proceed anyway? (Y/n) ")
+                if a not in ['Y', 'y', '']:
+                    return
+        else:
+            self.message("Creating output directory: {}", dirPath)
             os.makedirs(dirPath)
 
         self.dir = dirPath
@@ -486,9 +545,11 @@ can be either a list of strings or a string containing comma-separated step name
         self.out = open(filePath, "w")
 
         if copyScript:
+            self.message("Copying script source {} to {}", self.source, scriptPath)
             shutil.copyfile(self.source, scriptPath)
         if copyConf and self.configFile:
-            shutil.copyfile(self.configFile, scriptPath)
+            self.message("Copying config file {} to {}", self.configFile, dirPath + "/" + self.fullname(self.configFile))
+            shutil.copyfile(self.configFile, dirPath + "/" + self.fullname(self.configFile))
         self.previousDir = os.getcwd()
         os.chdir(dirPath)
         self.message("Current directory now: {}", dirPath)
@@ -616,19 +677,40 @@ Returns the command's output without the trailing \n."""
         except subprocess.CalledProcessError as cpe:
             return cpe.output.rstrip("\n")
 
-    def submit(self, scriptAndArgs, after=False, done=False, prefix=None):
+    def submit(self, scriptAndArgs, after=False, done=False, prefix=None, options=None):
         """Submit a script to the SGE queue with the submit command. `scriptAndArgs' is a string containing the qsub script that should be submitted and its arguments. If `after' is specified, schedule this job to run after the one whose jobid is the value of `after'. If `done' is a filename, the script will create an empty file with that name when done (use this in conjunction with the wait() method). Returns the jobid of the submitted job."""
         cmdline = submitCmd
         if after:
             cmdline = cmdline + " -after " + after
         if done:
             cmdline = cmdline + " -done " + done
+        if options:
+            cmdline = cmdline + " -o " + options
         if prefix == None:
-            prefix = self.Prefix
+            prefix = self.prefix
         if prefix != None:
             cmdline = cmdline + " -p " + prefix
         cmdline = cmdline + " " + scriptAndArgs
         return self.execute(cmdline)
+
+# Support for conversion to excel
+
+    def toExcel(self, filenames, outfile=False):
+        """Convert the supplied `filenames' (a list) to Excel. If `outfile' is provided,
+all files are combined into a single Excel file, one sheet per file. Otherwise, each
+file is converted to Excel format separately. Returns the list of Excel files written."""
+        converted = []
+        cmd = "module load dibig_tools;"
+        if outfile:
+            converted = [outfile]
+            cmd += "csvtoxls.py {} -q {}".format(outfile, " ".join(filenames))
+        else:
+            for f in filenames:
+                x = os.path.splitext(f)[0] + ".xlsx"
+                converted.append(x)
+                cmd += "csvtoxls.py {} -q {};".format(x, f)
+        self.shell(cmd)
+        return converted
 
 # Support for image sliders
 
@@ -750,6 +832,23 @@ H2 {
 }
 
 """
+
+    def formatProject(self, proj):
+        """Formats project string `proj' according to the following rules:
+- If it contains a |, treat as href|text and create a link
+- It it starts with http, convert to link
+- Otherwise, leave as is.
+"""
+        if proj == None:
+            return "(none)"
+        f = proj.find("|")
+        if f > 0:
+            parts = proj.split("|")
+            return "<A href='{}' target=_blank>{}</A>".format(parts[0], parts[1])
+        elif proj.startswith("http"):
+            return "<A href='{}' target=_blank>{}</A>".format(proj, proj)
+        else: 
+            return proj
     
     def preamble(self, out):
         "Writes the top part of the HTML output page (from beginning to end of the first box) to output stream `out'."""
@@ -772,16 +871,16 @@ H2 {
       <table class='main'>
         <tr>
           <td class='main'>
-            <b>Script:</b> {}<br>
+            <b>Title:</b> {}<br>
             <b>Project:</b> {}<br>
             <b>Started on:</b> {}<br>
             <b>Hostname:</b> {}<br>
             <b>Run directory:</b> {}<br>
 {}
-{}
           </td>
         </tr>
-""".format(self.Title, self.css(), self.headExtra(), self.header(), self.Title, self.Name, self.Project, self.dateAndTime(), self._subprocOutput("hostname"), os.getcwd(), src, conf))
+""".format(self.title, self.css(), self.headExtra(), self.header(), self.title, self.Name, 
+           self.formatProject(self.project), self.dateAndTime(), self._subprocOutput("hostname"), os.getcwd(), conf))
 
     def headExtra(self):
         """Returns additional tags for the <HEAD> section."""
@@ -805,6 +904,8 @@ H2 {
         if self.inScene:
             out.write("<BR><BR>Completed: <b>{}</b>".format(self.timeStamp()))
             out.write("</TD></TR>\n")
+        out.write("""<!--#config errmsg="" -->\n""")
+        out.write("""<!--#include file="additional/index.html" -->\n""")
         out.write("\n<TR><TD class='main'><small>{}</small></TD></TR>\n".format(self.Copyright))
         out.write("\n    </table>\n  </body>\n</html>\n")
 

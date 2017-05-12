@@ -238,7 +238,7 @@ class ScrollingTable(Table):
         stream.write("""  </TABLE>
 """)
         if self.caption:
-            stream.write("<I><SMALL><b>Table {}.</b> {}</SMALL></I>\n".format(self.tableNum[0], self.caption))
+            stream.write("<I><SMALL><b>Table {}.</b> {}</SMALL></I><BR><BR>\n".format(self.tableNum[0], self.caption))
             self.tableNum[0] += 1
         stream.write("""
   </CENTER>
