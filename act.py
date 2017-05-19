@@ -107,20 +107,22 @@ class Args():
 
 def usage():
     print """
-usage: actor.py [-d] [-y] [-z zipFile] [-Z] scriptName [arguments...]
+Usage: {} [-d] [-y] [-z zipFile] [-Z] scriptName [arguments...]
 
-  Executes script "scriptName" with the specified arguments. 
-  If "-z"  is specified, the output directory will be compressed
-  to a zip file with the specified name. If -Z is specified, 
-  the output directory will be compressed to a file having
-  as its name the script name followed by .zip. "-d" enables
-  debugging, ie the script will stop with a python error message
-  in case of errors, instead of trapping and reporting errors.
-  "-y" answers yes to all questions (unattended mode).
+Executes Actor script "scriptName" with the specified arguments. Options:
+
+  -z zipFile | After execution, compress the "useful" files in the output
+               directory to a ZIP file with the specified name. Useful
+               files are those matching patterns listed in the .files file.
+  -Z         | Like -z, but uses script name as basename of the zip file.
+  -d         | Debug mode: script will print backtrace in case of errors
+               (by default all errors are caught and only the error message 
+               is printed). Also disables -z.
+  -y         | Answer "yes" to all questions (unattended mode).
 
 Copyright (c) 2015-2017, A. Riva (ariva@ufl.edu)
 University of Florida
-"""
+""".format(os.path.split(sys.argv[0])[1])
 
 if __name__ == "__main__":
     
