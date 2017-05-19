@@ -17,11 +17,15 @@ class Director():
         self.steplist = []
         self.steps = []
 
-        lib = importlib.import_module(library)
-        self.registry = lib.REGISTRY
+        if type(library).__name__ == 'str':
+            library = [library]
+        for libname in library:
+
+            lib = importlib.import_module(libname)
+            self.registry.update(lib.REGISTRY)
 
     def setSteps(self, steplist):
-        """Set the list of steps to be performed by this dirctor to `steplist'. Steplist
+        """Set the list of steps to be performed by this director to `steplist'. Steplist
 can be either a list of strings or a string containing comma-separated step names (e.g.
 "step1, step2, step3". Use the step() method to know if a step should be executed."""
         if type(steplist).__name__ == 'str':
@@ -70,6 +74,7 @@ can be either a list of strings or a string containing comma-separated step name
         """Set all steps in this pipeline to dry, until `startkey' is reached. All steps
 from `startkey' onwards will be set to not-dry."""
         if startkey:
+            print "Starting at {}".format(startkey)
             dry = True
             for s in self.steps:
                 if s.key == startkey:
@@ -78,8 +83,8 @@ from `startkey' onwards will be set to not-dry."""
 
     def stopAt(self, stopkey):
         """Set all steps after `stopkey' to dry."""
-        print "Stopping at {}".format(stopkey)
         if stopkey:
+            print "Stopping at {}".format(stopkey)
             ok = False
             for s in self.steps:
                 # print s.key

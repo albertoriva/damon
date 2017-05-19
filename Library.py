@@ -1547,10 +1547,12 @@ class HomerPeaks(Line):
                     ACT.submit("homer.qsub findPeaks {} {} {}".format(mode, c['tags'], c['itags']), done="homerp.@.done")
                     nhomer += 1
         ACT.wait(("homerp.@.done", nhomer))
+        if not self.dry:
+            clscript = writeClassifyScript("classifypeaks.qsub", SC.conditions, ACT.genesdb)
         nhomer = 0
         for c in SC.conditions:
             if not self.dry:
-                ACT.submit("homer.qsub annotate {} {}".format(c['tags'], "hg38"), done="homera.@.done")
+                j = ACT.submit("homer.qsub annotate {} {}".format(c['tags'], "hg38"), done="homera.@.done")
                 nhomer += 1
         return ACT.wait(("homera.@.done", nhomer))
 
@@ -1558,7 +1560,8 @@ class HomerPeaks(Line):
         ACT = self.actor
         LOG = ACT.log
         SC = ACT.sc
-        
+
+        # Convert all peaks, regions, and enhancers files to Excel
         n = len(self.cnames)
         if ACT.missingOrStale("peaks.xlsx", other=self.peaks):
             args = ["{} -name {}".format(self.peaks[i], self.cnames[i]) for i in range(n) ]
