@@ -122,6 +122,7 @@ class Actor():
     ask = True                   # If False, run in unattendend mode
     source = ""                  # Name of file containing script
     configFile = None            # Name of configuration file
+    includeFile = ".files"       # Include list for Zip file
     excludeFile = ".exclude"     # Exclude list for Zip file
     tempfiles = []               # List of temporary files
     dir = ""                     # Output directory
@@ -136,6 +137,7 @@ class Actor():
     def __init__(self):
         self.Fields = {}
         self.Arguments = []
+        self.Include = []
         self.tempfiles = []
         self.previousDir = ""
 
@@ -158,6 +160,18 @@ class Actor():
     def _addToExclude(self, filename):
         with open(self.excludeFile, "a") as out:
             out.write("{}/{}\n".format(self.Name, filename))
+        return filename
+
+    def _addToInclude(self, *filenames):
+        with open(self.includeFile, "a") as out:
+            for f in filenames:
+                out.write("{}/{}\n".format(self.Name, f))
+        return filenames
+
+    def _addFile(self, filename):
+        """Add `filename' to the list of files that get copied to the script directory "as is" (e.g.
+stylesheets, logos)."""
+        self.Include.append(filename)
         return filename
 
     def _subprocOutput(self, command):

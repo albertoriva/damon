@@ -1700,7 +1700,8 @@ class HomerMotifs(Line):
             peaks  = c['tags'] + "/peaks.txt"
             LOG.log("Finding motifs in {}, output to {}".format(peaks, outdir))
             # Add motfis dir to Zip file
-            ACT.shell("echo '{}/{}/*' >> .files".format(ACT.Name, outdir))
+            ACT._addToInclude(outdir + "/*")
+            #ACT.shell("echo '{}/{}/*' >> .files".format(ACT.Name, outdir))
 
             if not self.dry:
                 ACT.submit("homer.qsub findMotifs {} {} {}".format(peaks, self.genome, outdir), done="homerm.@.done")
