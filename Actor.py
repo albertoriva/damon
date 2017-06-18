@@ -71,18 +71,20 @@ contains a value greater than or equal to `wanted'."""
             return False
 
 class GlobWaiter(CounterWaiter):
+    found = 0
 
     def __init__(self, filename, wanted):
         self.filename = filename
         self.wanted = wanted
-
+        
     def str(self):
-        return "<{} files matching {}>".format(self.wanted, self.filename)
+        return "<{}/{} files matching {}>".format(self.wanted-self.found, self.wanted, self.filename)
 
     def success(self):
         """A GlobWaiter is successful if the number of existing files matching
 the pattern in `filename' is greater than or equal to `wanted'."""
-        return (len(glob.glob(self.filename)) >= self.wanted)
+        self.found = len(glob.glob(self.filename))
+        return (self.found >= self.wanted)
         
     def delete(self):
         for f in glob.glob(self.filename):
@@ -127,7 +129,8 @@ class Actor():
     tempfiles = []               # List of temporary files
     dir = ""                     # Output directory
     out = False                  # Output stream
-    sceneIdx = 0                    # Number of current scene
+    toc = False                  # Stream for table of contents
+    sceneIdx = 0                 # Number of current scene
     inScene = False              # Are we inside a scene?
     previousDir = ""             # Directory before starting execution
     notifiedSteps = []
@@ -147,6 +150,10 @@ class Actor():
         if self.out and not self.out.closed:
             self.postamble(self.out)
             self.out.close()
+
+        if self.toc and not self.toc.closed:
+            self.toc.write("</TD></TR></OL>\n")
+            self.toc.close()
 
         # Remove temporary files
         for fdata in self.tempfiles:
@@ -202,6 +209,10 @@ stylesheets, logos)."""
         # inserted into `string' with format.
         sys.stderr.write(string.format(*args))
         sys.stderr.write("\n")
+
+    def messagelf(self, string, *args):
+        """Like `message', but moves the cursor at the beginning of the line first, and does not output a \n at the end."""
+        sys.stderr.write(chr(13) + string.format(*args) + "\033[K")
 
     def fullname(self, pathname):
         # Returns the filename part of `pathname'
@@ -283,9 +294,12 @@ Returns True if successful, signals an error otherwise."""
                 msg = "Error: file {} does not exist.\n".format(p)
             raise FileError(p, step)
 
-    def fileLines(self, filename):
+    def fileLines(self, filename, skipchar=None):
         """Returns the number of lines in `filename' (as a string)."""
-        r = self.shell("wc -l " + filename)
+        if skipchar:
+            r = self.shell("grep -v ^{} {} | wc -l -".format(skipchar, filename))
+        else:
+            r = self.shell("wc -l " + filename)
         p = r.find(" ")
         if p > 0:
             return r[:p]
@@ -488,17 +502,22 @@ can be either a list of strings or a string containing comma-separated step name
             wanted = [wanted]
 
         wanted = [ self._parseWait(w) for w in wanted ]
-        self.message("Waiting for: " + ", ".join([ w.str() for w in wanted]))
+        wmsg   = ", ".join([ w.str() for w in wanted])
+        self.messagelf("\nWaiting for: " + wmsg)
         while wanted != []:
+            newmsg = ", ".join([ w.str() for w in wanted])
+            if newmsg != wmsg:
+                wmsg = newmsg
+                self.messagelf("Waiting for: " + wmsg)
             for w in wanted:
                 success = w.success()
                 if success:
                     if delete:
                         w.delete()
                     wanted.remove(w)
-                    self.message("Waiting for: " + ", ".join([ w.str() for w in wanted]))
             if wanted != []:
-                time.sleep(1)
+                time.sleep(5)
+        self.message("\n")
         return True
 
     def copy(self, filename, dest="", exclude=False):
@@ -555,8 +574,11 @@ can be either a list of strings or a string containing comma-separated step name
 
         filePath = dirPath + "/" + html
         scriptPath = dirPath + "/" + self.fullname(self.source)
-        
+        tocPath = dirPath + "/toc.html"
+
         self.out = open(filePath, "w")
+        self.toc = open(tocPath, "w")
+        self.toc.write("<TR><TD class='main'><b>Table of contents:</b><OL>\n")
 
         if copyScript:
             self.message("Copying script source {} to {}", self.source, scriptPath)
@@ -575,6 +597,8 @@ can be either a list of strings or a string containing comma-separated step name
         """Open a new scene with title `title'."""
         self.sceneIdx += 1
         self.new_scene(self.out, self.sceneIdx, title, timestamp)
+        if self.toc:
+            self.toc.write("<LI><A href='#sc{}'>{}</A></LI>\n".format(self.sceneIdx, title))
 
     def reportf(self, text, *args):
         """Add `text' to the current scene in the report. The arguments `args', if present, are inserted into `text' using format."""
@@ -845,6 +869,32 @@ H2 {
   color: green;
 }
 
+TABLE.legend {
+  border: 1px solid black;
+  border-collapse: collapse;
+  background: white;
+}
+TABLE.legend TR:hover TD {
+  background: yellow;
+  cursor: pointer;
+}
+TH.legend {
+  padding: 2px;
+  border-bottom: 2px solid black;
+  background: lightgrey;
+  font-size: 10pt;
+  font-weight: bold;
+}
+TD.legend {
+  padding: 2px;
+  border-bottom: 1px solid black;
+  background: white;
+  font-size: 10pt;
+}
+IMG.bordered {
+  border: 1px solid black;
+}
+
 """
 
     def formatProject(self, proj):
@@ -892,7 +942,9 @@ H2 {
             <b>Run directory:</b> {}<br>
 {}
           </td>
-        </tr>
+       </tr>
+        <!--#config errmsg="" -->
+        <!--#include file="toc.html" -->
 """.format(self.title, self.css(), self.headExtra(), self.header(), self.title, self.Name, 
            self.formatProject(self.project), self.dateAndTime(), self._subprocOutput("hostname"), os.getcwd(), conf))
 
@@ -911,7 +963,7 @@ H2 {
                 out.write("<BR><BR>Completed: <b>{}</b>".format(self.timeStamp()))
             out.write("</TD></TR>\n")
         self.inScene = True
-        out.write("\n<TR><TD class='main'><big>{}. {}</big><BR>\n".format(idx, title))
+        out.write("\n<TR><TD class='main'><big><A name='sc{}'>{}. {}</A></big><BR>\n".format(idx, idx, title))
 
     def postamble(self, out):
         """Writes the final part of the HTML report to output stream `out'."""

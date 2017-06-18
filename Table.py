@@ -1,12 +1,110 @@
-###################################################
-#
-# (c) 2016, Alberto Riva, ariva@ufl.edu
-# DiBiG, ICBR Bioinformatics, University of Florida
-#
-# See the LICENSE file for license information.
-###################################################
+#####################################################
+#                                                   #
+# (c) 2016, Alberto Riva, ariva@ufl.edu             #
+# DiBiG, ICBR Bioinformatics, University of Florida #
+#                                                   #
+# See the LICENSE file for license information.     #
+#####################################################
 
 import sys
+
+def cellify(s):
+    tp = type(s).__name__
+    if tp == 'str':
+        return C(s)
+    elif tp == 'int':
+        return N(s)
+    elif tp == 'float':
+        return F(s)
+    else:
+        return s
+
+class TableCell():
+    cls = ""
+    value = ""
+
+    def __init__(self, v):
+        self.value = v
+
+    def printCell(self, v, cls):
+        if cls:
+            return "<TD class='{}'>{}</TD>".format(cls, v)
+        else:
+            return "<TD>{}</TD>".format(v)
+
+    def toHTML(self, cls=""):
+        return self.printCell(self.value, cls)
+
+class C(TableCell):
+    """Regular cell, printed as-is, left-aligned."""
+
+    pass
+
+class P(TableCell):
+    """Percentage cell, printed as nn.dd%, right-aligned."""
+
+    def __init__(self, v, div=None):
+        if div:
+            self.value = 1.0 * float(v) / float(div)
+        else:
+            self.value = float(v)
+
+    def toHTML(self, cls=""):
+        return self.printCell("{:.2f}%".format(100.0 * self.value), cls=cls + " aright")
+
+class A(TableCell):
+    """Anchor cell, printed as hyperlink, centered."""
+    href = ""
+    target = "_blank"
+
+    def __init__(self, href, text=None, target='_blank'):
+        self.href = href
+        self.target = target
+        if text:
+            self.value = text
+        else:
+            self.value = href
+
+    def toHTML(self, cls=""):
+        return self.printCell("<A href='{}' target='{}'>{}</A>".format(self.href, self.target, self.value), cls=cls + " acenter")
+
+class N(TableCell):
+    """Numeric cell, printed as-is, right aligned."""
+
+    def __init__(self, v):
+        self.value = int(v)
+
+    def toHTML(self, cls=""):
+        return self.printCell(self.value, cls=cls + " aright")
+
+class D(TableCell):
+    """Fancy number cell, printed with thousands separator, right-aligned."""
+
+    def __init__(self, v, cls=None):
+        self.value = int(v)
+        if cls:
+            self.cls = cls
+
+    def toHTML(self, cls=""):
+        return self.printCell("{:,}".format(self.value), cls=self.cls + cls + " aright")
+
+class F(TableCell):
+    """Floating point number, two decimals, right-aligned."""
+
+    def __init__(self, v):
+        self.value = float(v)
+
+    def toHTML(self, cls=""):
+        return self.printCell("{:.2f}".format(1.0 * self.value), cls=cls + " aright")
+
+class F3(TableCell):
+    """Floating point number, two decimals, right-aligned."""
+
+    def __init__(self, v):
+        self.value = float(v)
+
+    def toHTML(self, cls=""):
+        return self.printCell("{:.3f}".format(1.0 * self.value), cls=cls + " aright")
 
 class TableRow():
     """Class that represents a table row. A row has a parent (the table), a list of cells (strings)
@@ -14,7 +112,7 @@ and optionally a row header (a string)."""
     parent = None
     cells = []
     rowClass = None
-    cellClass = None
+    cellClass = ""
     rowHeader = None
     rowHeaderClass = None
     rowHeaderSpan = None
@@ -31,18 +129,19 @@ and optionally a row header (a string)."""
         if self.rowHeader:
             cls = " class='{}'".format(self.rowHeaderClass) if self.rowHeaderClass else ''
             r += "<TD rowspan={}{}>{}</TD>".format(self.rowHeaderSpan, cls, self.rowHeader)
-        if align:
+        if False: #align:
             for c, a in zip(self.cells, align):
                 r += "<TD"
                 if self.cellClass:
                     r += " class='{}'".format(self.cellClass)
-                r += " align='{}'>{}</TD>".format(a, c)
+                r += " align='{}'>{}</TD>".format(a, c.toHTML())
         else:
             for c in self.cells:
-                r += "<TD"
-                if self.cellClass:
-                    r += " class='{}'".format(self.cellClass)
-                r += ">{}</TD>".format(c)
+                r += c.toHTML(cls=self.cellClass)
+                #r += "<TD"
+                #if self.cellClass:
+                #    r += " class='{}'".format(self.cellClass)
+                #r += ">{}</TD>".format(c.toHTML())
         r += "</TR>"
         return r
 
@@ -93,6 +192,7 @@ class Table():
     headerCellClass = None
     bodyCellClass = None
     sectionCellClass = None
+    filename = None
 
     # Internal
     tableNum = [1]              # Make this persistent
@@ -101,7 +201,8 @@ class Table():
     adding = 'b'                # by default add to body
     tempRowHeader = None        # placeholder for a row header
     hasRowHeader = False
-    attrNames = ['id', 'caption', 'highlight', 'align', 'tableClass', 'headerRowClass', 'oddRowClass', 'evenRowClass', 'sectionRowClass']
+    attrNames = ['id', 'caption', 'highlight', 'align', 'tableClass', 'headerRowClass', 'oddRowClass', 'evenRowClass', 'sectionRowClass', 'filename']
+    filestream = None
 
     def __init__(self, **attributes):
         self.headRows = []
@@ -110,6 +211,8 @@ class Table():
         for a in self.attrNames:
             if a in attributes:
                 setattr(self, a, attributes[a])
+        if self.filename:
+            self.filestream = open(self.filename, "w")
 
     def startHead(self):
         self.adding = 'h'
@@ -124,6 +227,8 @@ class Table():
         """Add a cell representing a row header at the beginning of the current row."""
         self.tempRowHeader = ("<b>" + text + "</b>", rowspan)
         self.hasRowHeader = True
+        if self.filestream:
+            self.filestream.write(text)
 
     def _addRow(self, row):
         if self.adding == 'h':
@@ -137,6 +242,7 @@ class Table():
             self.ncols = nc
 
     def addRow(self, cells, align=None):
+        cells = [ cellify(c) for c in cells ]
         row = TableRow(self, cells)
         row.align = align or self.align
         row.rowClass = self.oddRowClass if (self.rowIdx % 2 == 1) else self.evenRowClass
@@ -146,6 +252,8 @@ class Table():
             self.tempRowHeader = None
         self._addRow(row)
         self.rowIdx += 1
+        if self.filestream:
+            self.filestream.write("\t".join([str(c.value) for c in cells]) + "\n")
         return row
 
     def addHeaderRow(self, titles):
@@ -153,6 +261,8 @@ class Table():
         row.rowClass = self.headerRowClass
         self._addRow(row)
         self.rowIdx = 1
+        if self.filestream:
+            self.filestream.write("#" + "\t".join(titles) + "\n")
         return row
 
     def addSectionRow(self, title):
@@ -160,6 +270,8 @@ class Table():
         row.rowClass = self.sectionRowClass
         self._addRow(row)
         self.rowIdx = 1
+        if self.filestream:
+            self.filestream.write("##" + title + "\n")
         return row
 
     def blockToHTML(self, stream, tag, rows, addAlign=False):
@@ -221,10 +333,12 @@ class Table():
         self.blockToHTML(stream, "TBODY", self.bodyRows, addAlign=True)
         self.blockToHTML(stream, "TFOOT", self.footRows)
         stream.write("</TABLE>\n")
+        if self.filestream:
+            self.filestream.close()
 
 class ScrollingTable(Table):
     visibleRows = 15
-    attrNames = ['id', 'caption', 'align', 'visibleRows', 'sectionRowClass']
+    attrNames = ['id', 'caption', 'align', 'visibleRows', 'sectionRowClass', 'filename']
 
     def toHTML(self, stream):
         #stream.write("  <TABLE class='table table-hover table-bordered table-condensed' id='{}'>\n".format(self.id))
@@ -237,6 +351,8 @@ class ScrollingTable(Table):
         self.blockToHTML(stream, "TFOOT", self.footRows)
         stream.write("""  </TABLE>
 """)
+        if self.filestream:
+            self.filestream.close()
         if self.caption:
             stream.write("<I><SMALL><b>Table {}.</b> {}</SMALL></I><BR><BR>\n".format(self.tableNum[0], self.caption))
             self.tableNum[0] += 1

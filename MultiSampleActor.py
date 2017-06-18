@@ -22,11 +22,10 @@ class MultiSampleActor(Actor):
         self.log.logStart(self.title)
 
         ## Ensure we don't have old files lying around
-        self.shell("rm -f *.done tmp-* ,files")
+        self.shell("rm -f *.done tmp-* .files")
 
         ## Initialize .files
-        self._addToInclude("*.html", "*.png" "*.pdf" "*.xlsx" "*.csv" "*.css" "*.js" "*.bed" "*.bedGraph" "*.conf")
-        #self.shell('rm -f .files; echo "*.html\n*.png\n*.pdf\n*.xlsx\n*.csv\n*.css\n*.js\n*.bed\n*.bedGraph\n*.conf" > .files')
+        self._addToInclude("*.html", "*.png", "*.pdf", "*.xlsx", "*.csv", "*.css", "*.js", "*.bed", "*.vcf", "*.bedGraph", "*.conf")
 
     def cleanup(self):
         self.log.logEnd()

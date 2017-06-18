@@ -97,7 +97,7 @@ class Args():
             zipcmd = ["-x", "*.IN.*", "-r", self.zipfile, ACT.dir]
             if os.path.isfile(inclFile):
                 zipcmd = ["-i@" + inclFile] + zipcmd
-            elif os.path.isfile(exclFile):
+            if os.path.isfile(exclFile):
                 zipcmd = ["-x@" + exclFile, "-x", exclFile] + zipcmd
             zipcmd = ["zip"] + zipcmd
             print zipcmd
