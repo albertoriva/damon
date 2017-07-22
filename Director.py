@@ -101,7 +101,24 @@ from `startkey' onwards will be set to not-dry."""
             print "{} {}".format("-" if s.dry else "+", s.name)
         if self.actor.ask:
             print "Press Enter to start execution."
-            raw_input()
+            try:
+                raw_input()
+                return True
+            except KeyboardInterrupt:
+                print "\nExecution cancelled."
+                return False
+
+    def run(self, ACT, title):
+        """Top-level method to run the pipeline."""
+        if self.showSteps():
+
+            ACT.script(ACT.title, title)
+            if ACT.begin(timestamp=False):
+                ACT.initFiles()
+                self.RunScript()
+                ACT.cleanup()
+                return True
+        return False
 
     def PerformAll(self, method, immediatestop=False):
         good = True

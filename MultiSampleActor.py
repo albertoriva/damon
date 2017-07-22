@@ -8,7 +8,6 @@ from Logger import Logger
 # Main class
 
 class MultiSampleActor(Actor):
-    log = Logger(None)          # To avoid errors in scripts that don't explicitly create one
     sc = None                   # SampleCollection
     libpath = "/apps/dibig_tools/1.0/lib/" # *** This should be configurable!
 

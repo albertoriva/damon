@@ -68,6 +68,15 @@ class A(TableCell):
     def toHTML(self, cls=""):
         return self.printCell("<A href='{}' target='{}'>{}</A>".format(self.href, self.target, self.value), cls=cls + " acenter")
 
+class R(TableCell):
+    """Text cell, printed as-is, right aligned."""
+
+    def __init__(self, v, cls=None):
+        self.value = v
+
+    def toHTML(self, cls=""):
+        return self.printCell(self.value, cls=cls + " aright")
+
 class N(TableCell):
     """Numeric cell, printed as-is, right aligned."""
 

@@ -19,6 +19,7 @@ from tempfile import mkstemp
 
 import ConfigParser
 import imageslider
+from Logger import Logger
 
 # Globals
 
@@ -32,6 +33,7 @@ submitCmd = "submit"
 # when the event it's waiting for happens
 
 class Waiter():
+    wanted = 0
     filename = ""
 
     def __init__(self, filename):
@@ -48,7 +50,6 @@ class Waiter():
         os.remove(self.filename)
 
 class CounterWaiter(Waiter):
-    wanted = 0
 
     def __init__(self, filename, wanted):
         self.filename = filename
@@ -119,6 +120,7 @@ class Actor():
     Conf = None                  # ConfigParser object
     Steps = []                   # Steps the user wants to run
     Prefix = None                # Prefix for submit jobs
+    log = Logger(None)           # To avoid errors in scripts that don't explicitly create one
 
     # Runtime
     ask = True                   # If False, run in unattendend mode
@@ -211,7 +213,7 @@ stylesheets, logos)."""
         sys.stderr.write("\n")
 
     def messagelf(self, string, *args):
-        """Like `message', but moves the cursor at the beginning of the line first, and does not output a \n at the end."""
+        """Like `message', but moves the cursor at the beginning of the line first, clears to end of line, and does not output a \n at the end."""
         sys.stderr.write(chr(13) + string.format(*args) + "\033[K")
 
     def fullname(self, pathname):
@@ -502,6 +504,7 @@ can be either a list of strings or a string containing comma-separated step name
             wanted = [wanted]
 
         wanted = [ self._parseWait(w) for w in wanted ]
+        nwanted = sum(w.wanted for w in wanted)
         wmsg   = ", ".join([ w.str() for w in wanted])
         self.messagelf("\nWaiting for: " + wmsg)
         while wanted != []:
@@ -517,6 +520,7 @@ can be either a list of strings or a string containing comma-separated step name
                     wanted.remove(w)
             if wanted != []:
                 time.sleep(5)
+        self.messagelf("{} jobs completed.".format(nwanted))
         self.message("\n")
         return True
 
@@ -565,7 +569,7 @@ can be either a list of strings or a string containing comma-separated step name
             if self.ask:
                 a = raw_input("The output directory already exists. Proceed anyway? (Y/n) ")
                 if a not in ['Y', 'y', '']:
-                    return
+                    return False
         else:
             self.message("Creating output directory: {}", dirPath)
             os.makedirs(dirPath)
@@ -592,6 +596,7 @@ can be either a list of strings or a string containing comma-separated step name
         for inc in self.Include:
             shutil.copy(inc, ".")
         self.preamble(self.out)
+        return True
 
     def scene(self, title, timestamp=False):
         """Open a new scene with title `title'."""
@@ -696,20 +701,23 @@ can be either a list of strings or a string containing comma-separated step name
     def execute(self, *strings):
         """Execute the command line represented by `strings', returning the output of the command."""
         cmd = " ".join([str(f) for f in strings])
-        self.message("Executing: {}", cmd)
+        if self.log:
+            self.log.log("Executing: {}", cmd)
         return self._subprocOutput(cmd)
 
     def executef(self, command, *args):
         """Like execute(), but the command line is created by applying `args' to `command' using format()."""
         cmd = command.format(*args)
-        self.message("Executing: {}", cmd)
+        if self.log:
+            self.log.log("Executing: {}", cmd)
         return self._subprocOutput(cmd)
 
     def shell(self, command, *args):
         """Like executef(), but allows multiple commands, redirection, piping, etc (runs a subshell).
 Returns the command's output without the trailing \n."""
         cmd = command.format(*args)
-        self.message("Executing: {}", cmd)
+        if self.log:
+            self.log.log("Executing: {}", cmd)
         try:
             return subprocess.check_output(cmd, shell=True).rstrip("\n")
         except subprocess.CalledProcessError as cpe:
@@ -733,20 +741,26 @@ Returns the command's output without the trailing \n."""
 
 # Support for conversion to excel
 
-    def toExcel(self, filenames, outfile=False):
+    def toExcel(self, filenames, outfile=False, force=False):
         """Convert the supplied `filenames' (a list) to Excel. If `outfile' is provided,
 all files are combined into a single Excel file, one sheet per file. Otherwise, each
-file is converted to Excel format separately. Returns the list of Excel files written."""
+file is converted to Excel format separately. If `force' is True, the Excel file is
+always generated, otherwise it's only generated when it is stale. Returns the list of 
+Excel files written."""
         converted = []
-        cmd = "module load dibig_tools;"
+        cmd = "module load dibig_tools; "
         if outfile:
-            converted = [outfile]
-            cmd += "csvtoxls.py {} -q {}".format(outfile, " ".join(filenames))
+            if force or self.missingOrStale(outfile, other=filenames):
+                converted = [outfile]
+                cmd += "csvtoxls.py {} -q {}".format(outfile, " ".join(filenames))
+            else:
+                return outfile
         else:
             for f in filenames:
                 x = os.path.splitext(f)[0] + ".xlsx"
-                converted.append(x)
-                cmd += "csvtoxls.py {} -q {};".format(x, f)
+                if force or self.missingOrStale(x, other=f):
+                    converted.append(x)
+                    cmd += "csvtoxls.py {} -q {};".format(x, f)
         self.shell(cmd)
         return converted
 
