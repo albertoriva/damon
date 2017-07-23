@@ -71,7 +71,7 @@ Submits script `scriptName' using {sub}, passing the values of `arguments'
 to the script as {args}. The script should be in the current directory 
 or in the scripts library (see the -ls option).
 
-Submit options:  
+Submit options (should be BEFORE script name):  
 
  -conf file   | Read additional {sub} options from `file' (default: "{conf}").
               | The path is relative to your home directory: for example, 
@@ -119,12 +119,6 @@ Submit options:
  -log logfile | Record job submissions to `logfile'. Degault: "../lib/submit.log"
               | (relative to location of this command).
 
-This command returns the id of the submitted job, which is suitable as the -after 
-argument for a subsequent job. For example:
-
-  STEP1=`submit.py step1.qsub`
-  STEP2=`submit.py -after $STEP1 step2.qsub`
-
 Other options:
 
  -ls           | List all the available *.qsub scripts in the default library directory. 
@@ -134,6 +128,20 @@ Other options:
  -v[v[v]] name | Print a one-line description of what script `name' does; "-vv" also 
                | prints a description of the command-line arguments accepted by the 
                | script, and "-vvv" prints out the entire script.
+
+Return value:
+
+This command prints the id of the submitted job, which is suitable as the -after 
+argument for a subsequent job. For example:
+
+  STEP1=`submit.py step1.qsub`
+  STEP2=`submit.py -after $STEP1 step2.qsub`
+
+Configuration:
+
+  SUBMIT_MODE - environment variable containing submit mode (slurm or pbs)
+  SUBMIT_LIB - directory containing qsub scripts
+  {conf} - file in home directory containing default submit options
 
 (c) 2014-2017, Alberto Riva, DiBiG, ICBR Bioinformatics Core, University of Florida.
 """.format(**fargs))
