@@ -10,161 +10,373 @@ import string
 import getpass
 from datetime import datetime
 
-trueArgs = []
-afterArgs = []
-doneFile = False
-confFile = ".qsubrc"
+DEFAULTS = {'slurm': {'command': "sbatch",
+                      'conf': ".sbatchrc",
+                      'directive': "#SBATCH",
+                      'jobid': "${SLURM_JOBID}"},
 
-scriptLibrary = os.path.dirname(__file__) + "/../lib/scripts/"
-logFile       = os.path.dirname(__file__) + "/../lib/submit.log"
+            'pbs': {'command': "squeue",
+                    'conf': ".qsubrc",
+                    'directive': "#PBS",
+                    'jobid': "${PBS_JOBID}"}}
 
-def writeLogEntry(script):
-    now = datetime.now()
-    with open(logFile, "a") as f:
-        fcntl.flock(f,fcntl.LOCK_EX)
+class Submit():
+    mode     = "slurm"         # Or "pbs"
+    dry      = False
+    debug    = False
+    decorate = True
+    doneFile = None
+    array    = None
+    comment  = None
+    queue    = None
+    coptions = None            # From cmdline -o option
+    foptions = None            # From confFile
+
+    confFile      = ".sbatchrc"
+    scriptLibrary = os.path.dirname(__file__) + "/../lib/scripts/"
+    logFile       = os.path.dirname(__file__) + "/../lib/submit.log"
+    trueArgs  = []
+    afterArgs = []
+
+    def __init__(self, mode):
+        self.mode = mode
+        self.confFile = DEFAULTS[mode]['conf']
+
+    def dump(self):
+        for a in ['mode', 'dry', 'decorate', 'doneFile', 'array', 'comment', 'queue', 'coptions', 'foptions', 'confFile', 'scriptLibrary', 'logFile', 'afterArgs', 'trueArgs']:
+            sys.stderr.write("{} = {}\n".format(a, getattr(self, a)))
+
+    def writeLogEntry(self, script):
+        """Write a log entry to the logFile to record that `script' was called. Uses locking."""
+        now = datetime.now()
         try:
-            f.write(now.isoformat('\t') + '\t' + getpass.getuser() + '\t' + script + '\n')
-        finally:
-            fcntl.flock(f,fcntl.LOCK_UN)
+            with open(self.logFile, "a") as f:
+                fcntl.flock(f,fcntl.LOCK_EX)
+                try:
+                    f.write(now.isoformat('\t') + '\t' + getpass.getuser() + '\t' + script + '\n')
+                finally:
+                    fcntl.flock(f,fcntl.LOCK_UN)
+        except:
+            sys.stderr.write("Warning: log file `{}' does not exist or is not writable.\n".format(self.logFile))
 
-def parseArgs():
-    nextIsAfter = False
-    nextIsDone = False
-    nextIsConf = False
-    global doneFile
+    def usage(self):
+        if self.mode == "slurm":
+            fargs = {'progname': sys.argv[0],
+                     'sub': "sbatch",
+                     'args': "$1, $2, $3, etc",
+                     'conf': self.confFile}
+        elif self.mode == "pbs":
+            fargs = {'progname': sys.argv[0],
+                     'sub': "squeue",
+                     'args': "$arg1, $arg2, $arg3, etc",
+                     'conf': self.confFile}
 
-    for a in sys.argv[1:]:
-        if nextIsAfter:
-            afterArgs.append(a)
-            nextIsAfter = False
-        elif nextIsDone:
-            doneFile = a
-            nextIsDone = False
-        elif nextIsConf:
-            confFile = a
-            nextIsConf = False
-        elif a == "-after":
-            nextIsAfter = True
-        elif a == "-done":
-            nextIsDone = True
-        elif a == "-conf":
-            nextIsConf = True
-        else:
-            trueArgs.append(a)
+        sys.stdout.write("""{progname} - submit jobs to a cluster scheduler.
 
-def usage():
-    print """
-usage: submit.py [-after jobid] [-done name] scriptName [arguments...]
+Usage: submit [submit-options] scriptName [arguments...]
+       submit -ls
+       submit -v[v[v]] scriptName
 
-  Submits script "scriptName" using qsub, passing the values
-  of "arguments" to the script as $arg1, $arg2, $arg3, etc. 
+Submits script `scriptName' using {sub}, passing the values of `arguments'
+to the script as {args}. The script should be in the current directory 
+or in the scripts library (see the -ls option).
 
-  If "-after" is specified, the script will run after the job 
-  indicated by "jobid" has terminated successfully. Multiple 
-  "-after" arguments may be specified.
+Submit options:  
 
-  If "-done" is specified, the script will create a file called "name"
-  when it terminates. This can be used to detect that execution of the
-  script has finished.
+ -conf file   | Read additional {sub} options from `file' (default: "{conf}").
+              | The path is relative to your home directory: for example, 
+              | "-conf confs/largejob.txt" will read options from the "largejob.txt"
+              | file in the confs/ subdirectory of your home. Set this argument to 
+              | a non-existent file to disable option loading.
 
-  Additional qsub options can be read from a file (by default, \".qsubrc\"
-  in your home directory). You can change the name of this file with the
-  \"-conf\" argument. The path is relative to your home directory, so for
-  example \"-conf confs/largejob.txt\" will read configuration options from
-  the largejob.txt file in the confs/ subdirectory of your home. Set this
-  argument to a non-existent file to disable option loading.
+ -after jobid | The script will run after the job indicated by "jobid" has 
+              | terminated successfully. Multiple "-after" arguments may
+              | be specified.
 
-  This command returns the id of the submitted job, which is suitable
-  as the -after argument for a subsequent job. For example:
+ -done name   | The script will create a file called "name" when it terminates.
+              | This can be used to detect that execution of the script has 
+              | finished. If the file name contains the `@' character, it will 
+              | be replaced with the job ID.
 
-  STEP1=`submit.py step1.sh`
-  STEP2=`submit.py -after $STEP1 step2.sh`
+ -p comment   | Associate `comment' with with the submitted job. This is useful 
+              | to distinguish instances of the same script submitted for different 
+              | projects. Cannot be combined with "-n".
 
-Copyright (c) 2014, Alberto Riva (ariva@ufl.edu), University of Florida
-"""
+ -q queue     | Passed to {sub} as the -A argument, to specify a destination queue.
 
-def set_vars(values):
-    idx = 1
-    names = ["args"]
-    os.putenv("args", " ".join(values))
+ -t arrspec   | Passed to {sub} as the -a argument, to specify a job array.
 
-    for v in values:
-        name = "arg" + str(idx)
-        os.putenv(name, v)
-        names.append(name)
-        idx = idx + 1
+ -o options   | Pass `options' to the {sub} command-line. The options should be 
+              | separated by commas, with no spaces between them. For example: 
+              | "-o --mem=10G,--time=20:00:00".
 
-    return names
+ -n           | Submit will NOT modify the script (by default, submit will add 
+              | messages printing start and stop times for the script). This 
+              | option is incompatible with "-done" and "-n".
 
-def readOptions(optfile):
-    optpath = os.path.expanduser("~/" + optfile)
-    if os.path.isfile(optpath):
-        with open(optpath, 'r') as f:
-            opts = f.read()
-        opts = opts.replace('\n', ' ')
-        return opts
-    else:
-        return ""
+ -x           | Only print submission command, do not execute it.
 
-def decorateScript(infile, outfile):
-    inHeader = True
-    out = open(outfile, "w")
-    inf = open(infile, "r")
-    for row in inf:
-        if inHeader:
-            srow = row.strip()
-            if len(srow) == 0:
-                pass
-            elif srow.find("#!") == 0:
-                pass
-            elif srow.find("#PBS") == 0:
-                pass
+ -mode sched  | Use syntax for the `sched' scheduler. Possible values are "slurm"
+              | (the default) and "pbs". The mode can also be set by assigning a
+              | value to the SUBMIT_MODE environment variable. The command-line
+              | option takes precedence over the environment variable.
+
+ -lib libdir  | Use `libdir' as the scripts library. Default: ../lib/scripts
+              | (relative to location of this command).
+
+ -log logfile | Record job submissions to `logfile'. Degault: ../lib/submit.log
+              | (relative to location of this command).
+
+This command returns the id of the submitted job, which is suitable as the -after 
+argument for a subsequent job. For example:
+
+  STEP1=`submit.py step1.qsub`
+  STEP2=`submit.py -after $STEP1 step2.qsub`
+
+Other options:
+
+ -ls           | List all the available *.qsub scripts in the default library directory. 
+               | The location of the library is printed before the list of scripts. If 
+               | this argument is specified, all other arguments are ignored.
+
+ -v[v[v]] name | Print a one-line description of what script `name' does; "-vv" also 
+               | prints a description of the command-line arguments accepted by the 
+               | script, and "-vvv" prints out the entire script.
+
+(c) 2014-2017, Alberto Riva, DiBiG, ICBR Bioinformatics Core, University of Florida.
+""".format(**fargs))
+
+    def parseArgs(self, args):
+        after = False
+        next = ""
+        valuedArgs = ['-v', '-vv', '-vvv', '-conf', '-after', '-done', '-n', '-p', '-q', '-t', '-o', '-lib', '-log', '-x', '-debug']
+
+        if args == []:
+            self.usage()
+            return False
+        if "-ls" in args:
+            self.listScripts()
+            return False
+
+        for a in args:
+            if after:
+                self.trueArgs.append(a)
             else:
-                inHeader = False
-                out.write("\necho Commandline: " + string.join(sys.argv[1:]) + "\n")
-                out.write("echo Started: `date`\n\n")
-        out.write(row)
-    out.write("echo Terminated: `date`\n")
-    if doneFile:
-        p = doneFile.find("@")
-        if p >= 0:
-            newDone = doneFile[0:p] + "${PBS_JOBID}" + doneFile[p+1:]
-            out.write("touch " + newDone + "\n");
+                if a == "-n":
+                    self.decorate = False
+                elif a == "-x":
+                    self.dry = True
+                elif a == "-debug":
+                    self.debug = True
+                elif a in ["-h", "--help"]:
+                    self.usage()
+                    return False
+                if next in ['-v', '-vv', '-vvv']:
+                    self.viewScript(a, next)
+                    return False
+                if next == "-conf":
+                    self.confFile = a
+                    next = ""
+                elif next == "-after":
+                    self.afterArgs.append(a)
+                    next = ""
+                elif next == "-done":
+                    self.doneFile = a
+                    next = ""
+                elif next == "-p":
+                    self.comment = a
+                    next = ""
+                elif next == "-q":
+                    self.queue = a
+                    next = ""
+                elif next == "-t":
+                    self.array = a
+                    next = ""
+                elif next == "-o":
+                    self.coptions = a
+                    next = ""
+                elif next == "-lib":
+                    self.scriptLibrary = a
+                    next = ""
+                elif next == "-log":
+                    self.logFile = a
+                    next = ""
+                elif a in valuedArgs:
+                    next = a 
+                else:
+                    self.trueArgs.append(a)
+                    after = True
+        if self.trueArgs:
+            return True
         else:
-            out.write("/apps/dibig_tools/1.0/bin/touch-done " + doneFile + "\n")
-    inf.close()
-    out.close()
+            sys.stderr.write("Error: missing script name. Use -h for help.\n")
+            return False
 
-# Main
-sys.stderr.write("Script library: " + scriptLibrary + "\n")
+    def readOptions(self, optfile):
+        optpath = os.path.expanduser("~/" + optfile)
+        if os.path.isfile(optpath):
+            with open(optpath, 'r') as f:
+                opts = f.read()
+            self.foptions = opts.replace('\n', ' ')
+        return self.foptions
+
+    def setVars(values):
+        idx = 1
+        names = ["args"]
+        os.putenv("args", " ".join(values))
+        
+        for v in values:
+            name = "arg" + str(idx)
+            os.putenv(name, v)
+            names.append(name)
+            idx = idx + 1
+
+        return names
+
+    def decorateScript(self, infile, outfile):
+        dirtag = DEFAULTS[self.mode]['directive']
+        inHeader = True
+        with open(outfile, "w") as out:
+            with open(infile, "r") as inf:
+                for row in inf:
+                    if inHeader:
+                        srow = row.strip()
+                        if len(srow) == 0 or srow.startswith("#!") or srow.startswith(dirtag):
+                            pass
+                        else:
+                            inHeader = False
+                            out.write("\necho Commandline: " + " ".join(self.trueArgs) + "\n")
+                            out.write("echo Started: `date`\n\n")
+                    out.write(row)
+                out.write("echo Terminated: `date`\n")
+            if self.doneFile:
+                p = self.doneFile.find("@")
+                if p >= 0:
+                    self.doneFile = self.doneFile[0:p] + DEFAULTS[self.mode]['jobid'] + self.doneFile[p+1:]
+                out.write("touch " + self.doneFile + "\n");
+
+    def resolveScriptName(self):
+        scriptName = self.trueArgs[0]
+        if not os.path.isfile(scriptName):
+            scriptName = self.scriptLibrary + "/" + scriptName
+            if not os.path.isfile(scriptName):
+                sys.stderr.write("Error: script `{}' not found either in current directory or in script library!\n(Script library: {})\n".format(self.trueArgs[0], self.scriptLibrary))
+                return (False, False)
+        return (scriptName, self.trueArgs[0] + ".IN")
+
+    def makeCmdline_slurm(self, name):
+        cmdline = 'sbatch --parsable -D "`pwd`"'
+        if self.array:
+            cmdline += " -o {}.o%A_%a -e {}.e%A_%a -a".format(name, name, self.array)
+        else:
+            cmdline += " -o {}.o%j -e {}.o%j".format(name, name)
+        if self.comment:
+            cmdline += ' --comment "{}"'.format(self.comment)
+        if self.afterArgs:
+            aspecs = [ "afterok:" + a for a in self.afterArgs ]
+            cmdline += " -d " + ",".join(aspecs)
+        if self.queue:
+            cmdline += " -A " + self.queue
+        if self.foptions:
+            cmdline += " " + self.foptions
+        if self.coptions:
+            cmdline += " " + self.coptions
+        return cmdline + " {} {}".format(name, " ".join(self.trueArgs[1:]))
+
+    def makeCmdline_pbs(self, name):
+        cmdline = 'qsub -d "`pwd`"'
+        if self.afterArgs:
+            aspecs = [ "afterok:" + a for a in self.afterArgs ]
+            cmdline += " -W depend=" + ",".join(aspecs)
+        
+        # do be continued...
+        return cmdline + " " + " ".join(self.trueArgs)
+
+    def main(self):
+        (origScript, decScript) = self.resolveScriptName()
+        if origScript:
+            if self.decorate:
+                self.decorateScript(origScript, decScript)
+                toRun = decScript
+            else:
+                toRun = origScript
+            cmdline = self.makeCmdline_slurm(toRun)
+            sys.stderr.write("Executing: " + cmdline + "\n")
+            if not self.dry:
+                os.system(cmdline)
+            self.writeLogEntry(toRun)
+            if self.decorate and not self.debug:
+                os.remove(decScript)
+
+    ### Additional commands
+
+    def listScripts(self):
+        files = glob.glob("{}/*.qsub".format(self.scriptLibrary))
+        files = [ os.path.split(f)[1] for f in files ]
+        files.sort()
+        sys.stdout.write("Scripts in {}:\n".format(self.scriptLibrary))
+        for f in files:
+            sys.stdout.write("  " + f + "\n")
+        sys.stdout.write("\n")
+
+    def readScriptInfo(self, filename):
+        desc = ""
+        args = []
+        mode = "before"
+
+        with open(filename, "r") as f:
+            for line in f:
+                if mode == "before":
+                    if line.startswith("##"):
+                        desc = line[2:]
+                        mode = "args"
+                elif mode == "args":
+                    if line.startswith("##"):
+                        args.append(line[2:])
+                    else:
+                        break
+        return (desc, args)
+
+    def viewScript(self, script, arg):
+        (orig, ignore) = self.resolveScriptName(script)
+        if orig:
+            mode = arg.count("v")
+            if mode == 3:
+                with open(orig, "r") as f:
+                    sys.stdout.write(f.read())
+                    sys.stdout.write("\n")
+                return
+            (desc, args) = self.readScriptInfo(orig)
+            sys.stdout.write("{} - {}\n".format(script, desc))
+            if mode == 2:
+                sys.stdout.write("Arguments:\n")
+                for a in args:
+                    sys.stdout.write(" " + a + "\n")
+
+def getMode(arglist):
+    """Returns the mode (currently one of `slurm' or `pbs') examining 
+the SUBMIT_MODE environment variable and the command line (-mode option)."""
+    mode = os.getenv("SUBMIT_MODE") or "pbs"
+    nargs = len(arglist)
+    for i in range(nargs):
+        if arglist[i] == "-mode" and i < nargs - 1:
+            mode = arglist[i+1]
+            break
+    return mode
 
 if __name__ == "__main__":
-
-    if len(sys.argv) < 2:
-        usage()
-        exit(1)
-
-    parseArgs()
-    scriptName = trueArgs[0]
-    scriptPath = scriptLibrary + scriptName
-    # *** todo: check that the script exists.
-    newScriptName = scriptName + ".IN"
-    decorateScript(scriptPath, newScriptName)
-    varList = set_vars(trueArgs[1:])
-    varNames = string.join(varList, ",")
-    opts = readOptions(confFile)
-
-    cmdline = "qsub -d `pwd` " + opts
-
-    if varNames != '':
-        cmdline = cmdline + "-v " + varNames
-
-    if len(afterArgs) > 0:
-        afterArgs = [ "afterok:" + a for a in afterArgs]
-        afterCmd = " -W depend=" + string.join(afterArgs, ",")
-        cmdline = cmdline + afterCmd
-
-    cmdline = cmdline + " " + newScriptName
-    sys.stderr.write("Executing: " + cmdline + "\n")
-    os.system(cmdline)
-    writeLogEntry(scriptName)
+    arglist = sys.argv[1:]
+    mode = getMode(arglist)
+    if mode in DEFAULTS:
+        S = Submit(mode)
+        if S.parseArgs(arglist):
+            if S.debug:
+                S.dump()
+                S.main()
+            else:
+                try:
+                    S.main()
+                except Exception as e:
+                    sys.stderr.write("Error: {}".format(e))
+    else:
+        sys.stderr.write("Error: mode should be one of {}.\n".format(", ".join(DEFAULTS.keys())))
