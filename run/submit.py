@@ -5,20 +5,10 @@
 
 import os, os.path
 import sys
+import glob
 import fcntl
-import string
 import getpass
 from datetime import datetime
-
-DEFAULTS = {'slurm': {'command': "sbatch",
-                      'conf': ".sbatchrc",
-                      'directive': "#SBATCH",
-                      'jobid': "${SLURM_JOBID}"},
-
-            'pbs': {'command': "squeue",
-                    'conf': ".qsubrc",
-                    'directive': "#PBS",
-                    'jobid': "${PBS_JOBID}"}}
 
 class Submit():
     mode     = "slurm"         # Or "pbs"
@@ -32,15 +22,15 @@ class Submit():
     coptions = None            # From cmdline -o option
     foptions = None            # From confFile
 
-    confFile      = ".sbatchrc"
-    scriptLibrary = os.path.dirname(__file__) + "/../lib/scripts/"
-    logFile       = os.path.dirname(__file__) + "/../lib/submit.log"
+    confFile  = ".sbatchrc"
+    logFile   = os.path.dirname(__file__) + "/../lib/submit.log"
     trueArgs  = []
     afterArgs = []
 
     def __init__(self, mode):
         self.mode = mode
         self.confFile = DEFAULTS[mode]['conf']
+        self.scriptLibrary = os.getenv("SUBMIT_LIB") or os.path.dirname(__file__) + "/../lib/scripts/"
 
     def dump(self):
         for a in ['mode', 'dry', 'decorate', 'doneFile', 'array', 'comment', 'queue', 'coptions', 'foptions', 'confFile', 'scriptLibrary', 'logFile', 'afterArgs', 'trueArgs']:
@@ -121,10 +111,12 @@ Submit options:
               | value to the SUBMIT_MODE environment variable. The command-line
               | option takes precedence over the environment variable.
 
- -lib libdir  | Use `libdir' as the scripts library. Default: ../lib/scripts
-              | (relative to location of this command).
+ -lib libdir  | Use `libdir' as the scripts library. Default: "../lib/scripts"
+              | (relative to location of this command). This can also be set
+              | by assigning a value to the SUBMIT_LIB environment variable. The
+              | command-line option takes precedence over the environment variable.
 
- -log logfile | Record job submissions to `logfile'. Degault: ../lib/submit.log
+ -log logfile | Record job submissions to `logfile'. Degault: "../lib/submit.log"
               | (relative to location of this command).
 
 This command returns the id of the submitted job, which is suitable as the -after 
@@ -149,13 +141,10 @@ Other options:
     def parseArgs(self, args):
         after = False
         next = ""
-        valuedArgs = ['-v', '-vv', '-vvv', '-conf', '-after', '-done', '-n', '-p', '-q', '-t', '-o', '-lib', '-log', '-x', '-debug']
+        valuedArgs = ['-v', '-vv', '-vvv', '-conf', '-after', '-done', '-n', '-p', '-q', '-t', '-o', '-lib', '-log', '-debug', '-mode']
 
         if args == []:
             self.usage()
-            return False
-        if "-ls" in args:
-            self.listScripts()
             return False
 
         for a in args:
@@ -168,13 +157,18 @@ Other options:
                     self.dry = True
                 elif a == "-debug":
                     self.debug = True
+                elif a == "-ls":
+                    self.listScripts()
+                    return False
                 elif a in ["-h", "--help"]:
                     self.usage()
                     return False
-                if next in ['-v', '-vv', '-vvv']:
+                elif next == "-mode":
+                    next = ""   # -mode has already been processed
+                elif next in ['-v', '-vv', '-vvv']:
                     self.viewScript(a, next)
                     return False
-                if next == "-conf":
+                elif next == "-conf":
                     self.confFile = a
                     next = ""
                 elif next == "-after":
@@ -212,8 +206,8 @@ Other options:
             sys.stderr.write("Error: missing script name. Use -h for help.\n")
             return False
 
-    def readOptions(self, optfile):
-        optpath = os.path.expanduser("~/" + optfile)
+    def readOptions(self):
+        optpath = os.path.expanduser("~/" + self.confFile)
         if os.path.isfile(optpath):
             with open(optpath, 'r') as f:
                 opts = f.read()
@@ -255,16 +249,19 @@ Other options:
                     self.doneFile = self.doneFile[0:p] + DEFAULTS[self.mode]['jobid'] + self.doneFile[p+1:]
                 out.write("touch " + self.doneFile + "\n");
 
-    def resolveScriptName(self):
-        scriptName = self.trueArgs[0]
+    def resolveScriptName(self, scriptName):
         if not os.path.isfile(scriptName):
             scriptName = self.scriptLibrary + "/" + scriptName
             if not os.path.isfile(scriptName):
                 sys.stderr.write("Error: script `{}' not found either in current directory or in script library!\n(Script library: {})\n".format(self.trueArgs[0], self.scriptLibrary))
                 return (False, False)
-        return (scriptName, self.trueArgs[0] + ".IN")
+        if self.trueArgs:
+            decName = self.trueArgs[0] + ".IN"
+        else:
+            decName = False
+        return (scriptName, decName)
 
-    def makeCmdline_slurm(self, name):
+    def makeCmdline(self, name):
         cmdline = 'sbatch --parsable -D "`pwd`"'
         if self.array:
             cmdline += " -o {}.o%A_%a -e {}.e%A_%a -a".format(name, name, self.array)
@@ -283,24 +280,16 @@ Other options:
             cmdline += " " + self.coptions
         return cmdline + " {} {}".format(name, " ".join(self.trueArgs[1:]))
 
-    def makeCmdline_pbs(self, name):
-        cmdline = 'qsub -d "`pwd`"'
-        if self.afterArgs:
-            aspecs = [ "afterok:" + a for a in self.afterArgs ]
-            cmdline += " -W depend=" + ",".join(aspecs)
-        
-        # do be continued...
-        return cmdline + " " + " ".join(self.trueArgs)
-
     def main(self):
-        (origScript, decScript) = self.resolveScriptName()
+        (origScript, decScript) = self.resolveScriptName(self.trueArgs[0])
         if origScript:
             if self.decorate:
                 self.decorateScript(origScript, decScript)
                 toRun = decScript
             else:
                 toRun = origScript
-            cmdline = self.makeCmdline_slurm(toRun)
+            self.readOptions()
+            cmdline = self.makeCmdline(toRun)
             sys.stderr.write("Executing: " + cmdline + "\n")
             if not self.dry:
                 os.system(cmdline)
@@ -351,12 +340,47 @@ Other options:
             if mode == 2:
                 sys.stdout.write("Arguments:\n")
                 for a in args:
-                    sys.stdout.write(" " + a + "\n")
+                    sys.stdout.write(" " + a)
+
+### PBS support
+
+class SubmitPBS(Submit):
+    varNames = []
+
+    def setVars(self):
+        subargs = self.trueArgs[1:]
+        self.varNames.append("args")
+        os.putenv("args", " ".join(subargs))
+        idx = 1
+        for arg in subargs:
+            name = "arg{}".format(idx)
+            self.varNames.append(name)
+            os.putenv(name, arg)
+            idx += 1
+
+    def makeCmdline(self, name):
+        self.setVars()
+        cmdline = 'qsub -d "`pwd`"'
+        if self.varNames:
+            cmdline += " -v " + ",".join(self.varNames)
+        if self.afterArgs:
+            aspecs = [ "afterok:" + a for a in self.afterArgs ]
+            cmdline += " -W depend=" + ",".join(aspecs)
+        if self.queue:
+            cmdline += " -q " + self.queue
+        if self.array:
+            cmdline += " -t" + self.array
+        if self.foptions:
+            cmdline += " " + self.foptions
+        if self.coptions:
+            cmdline += " " + self.coptions
+
+        return cmdline + " " + " ".join(self.trueArgs)
 
 def getMode(arglist):
     """Returns the mode (currently one of `slurm' or `pbs') examining 
 the SUBMIT_MODE environment variable and the command line (-mode option)."""
-    mode = os.getenv("SUBMIT_MODE") or "pbs"
+    mode = os.getenv("SUBMIT_MODE") or "slurm"
     nargs = len(arglist)
     for i in range(nargs):
         if arglist[i] == "-mode" and i < nargs - 1:
@@ -364,11 +388,24 @@ the SUBMIT_MODE environment variable and the command line (-mode option)."""
             break
     return mode
 
+DEFAULTS = {'slurm': {'class': Submit,
+                      'command': "sbatch",
+                      'conf': ".sbatchrc",
+                      'directive': "#SBATCH",
+                      'jobid': "${SLURM_JOBID}"},
+
+            'pbs': {'class': SubmitPBS,
+                    'command': "squeue",
+                    'conf': ".qsubrc",
+                    'directive': "#PBS",
+                    'jobid': "${PBS_JOBID}"}}
+
 if __name__ == "__main__":
     arglist = sys.argv[1:]
     mode = getMode(arglist)
     if mode in DEFAULTS:
-        S = Submit(mode)
+        subclass = DEFAULTS[mode]['class']
+        S = subclass(mode)
         if S.parseArgs(arglist):
             if S.debug:
                 S.dump()
