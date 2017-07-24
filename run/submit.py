@@ -272,7 +272,7 @@ Configuration:
     def makeCmdline(self, name):
         cmdline = 'sbatch --parsable -D "`pwd`"'
         if self.array:
-            cmdline += " -o {}.o%A_%a -e {}.e%A_%a -a".format(name, name, self.array)
+            cmdline += " -o {}.o%A_%a -e {}.e%A_%a -a {}".format(name, name, self.array)
         else:
             cmdline += " -o {}.o%j -e {}.o%j".format(name, name)
         if self.comment:
