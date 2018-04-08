@@ -36,12 +36,12 @@ newconf() {
 ## Main starts here
 
 case $prog in 
-  rnaseq|chipseq|atacseq|generep|generep2|dmap2|testp|snpcall|ma)
+  rnaseq|chipseq|atacseq|generep|generep2|dmap2|testing|snpcall|ma)
     script=${PIPELINE_HOME}/${prog}.py
     ;;
   *)
     echo "Unknown script ${prog}."
-    echo "Known scripts: rnaseq, chipseq, atacseq, generep2, dmap2, ma"
+    echo "Known scripts: rnaseq, chipseq, atacseq, generep2, dmap2, ma, snpcall, testing"
     exit 1
     ;;
 esac

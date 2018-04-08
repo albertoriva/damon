@@ -2,12 +2,14 @@
 # University of Florida
 
 import os
+import inspect
 
 class Line():
     """This class is the parent of all classes representing operations performed by the pipelines.
 Its methods all do nothing and return True."""
     
-    name = "(no name)"
+    tag = None                  # Identifier in pipeline code
+    name = "(no name)"          # Readable name
     key = ""
     actor = None
     dry = False
@@ -38,13 +40,17 @@ Its methods all do nothing and return True."""
             except:
                 pass
 
+    def error(self, message, *args):
+        msg = message.format(*args)
+        self.status = msg
+        return False
+
     def checkFiles(self, *filenames):
         LOG = self.actor.log
         for f in filenames:
             if not os.path.isfile(f):
-                if LOG:
-                    LOG.log("Step `{}' requires file `{}' that does not exist. Terminating.", self.name, f)
-                exit(1)
+                return self.error("Step `{}' requires file `{}' that does not exist. Terminating.", self.name, f)
+        return True
 
     def Setup(self):
         """The Setup() method is called by init."""
@@ -77,5 +83,5 @@ All PostExecute methods are called in order after the pipeline has finished exec
         """The Report method writes the report to `stream'."""
         return True
 
-
-        
+def isLine(c):
+    return Line in inspect.getmro(c)

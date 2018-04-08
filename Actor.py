@@ -136,6 +136,11 @@ class Actor():
     inScene = False              # Are we inside a scene?
     previousDir = ""             # Directory before starting execution
     notifiedSteps = []
+    methods = []                 # List of strings for methods section
+    references = []              # List of references for methods section
+    nreferences = 0              # Number of references
+    complete = False             # Set to true for successful completion
+    error = None                 # Set to an error message in case of errors
 
     # Internal methods (not meant to be called by user)
 
@@ -279,10 +284,10 @@ stylesheets, logos)."""
 Returns fixPath(p) if successful, signals an error otherwise."""
         if p == None:
             return p
-        elif not os.path.isfile(p):
-            raise FileError(p)
-        else:
+        elif os.path.isfile(p) or os.path.islink(p):
             return self.fixPath(p)
+        else:
+            raise FileError(p)
 
     def checkFile(self, p, step=False):
         """Checks that the file indicated by pathname p exists and is readable.
@@ -297,7 +302,8 @@ Returns True if successful, signals an error otherwise."""
             raise FileError(p, step)
 
     def fileLines(self, filename, skipchar=None):
-        """Returns the number of lines in `filename' (as a string)."""
+        """Returns the number of lines in `filename' (as a string). If `skipchar' is specified,
+only counts lines that do NOT start with that charachter."""
         if skipchar:
             r = self.shell("grep -v ^{} {} | wc -l -".format(skipchar, filename))
         else:
@@ -315,7 +321,13 @@ Returns True if successful, signals an error otherwise."""
         if os.path.isfile(filename):
             self.configFile = filename
             self.Conf = ConfigParser.ConfigParser()
+            self.Conf.optionxform = str
             self.Conf.read(filename)
+
+            if self.Conf.has_section("Include"):
+                for (label, incfile) in self.Conf.items("Include"):
+                    if os.path.isfile(incfile):
+                        self.Conf.read(incfile)
 
             # Set standard attributes
             self.title = self.getConf("title")
@@ -723,6 +735,25 @@ Returns the command's output without the trailing \n."""
         except subprocess.CalledProcessError as cpe:
             return cpe.output.rstrip("\n")
 
+    def query(self, database, query, *args):
+        """Executes `query' on sqlite3 database `database'; returns results as a list of lists."""
+        q = query.format(*args)
+        result = self.shell("""sqlite3 {} "{}" """.format(database, q))
+        return [row.split("|") for row in result.split("\n")]
+
+    def queryToDict(self, database, fields, query, *args):
+        """Executes `query' on sqlite3 database `database'; returns results as a list of 
+dictionaries, using the elements of `fields' as keys."""
+        result = []
+        q = query.format(*args)
+        rows = self.shell("""sqlite3 {} "{}" """.format(database, q)).split("\n")
+        for row in rows:
+            d = {}
+            for (k, v) in zip(fields, row.split("|")):
+                d[k] = v
+            result.append(d)
+        return result
+
     def submit(self, scriptAndArgs, after=False, done=False, prefix=None, options=None):
         """Submit a script to the SGE queue with the submit command. `scriptAndArgs' is a string containing the qsub script that should be submitted and its arguments. If `after' is specified, schedule this job to run after the one whose jobid is the value of `after'. If `done' is a filename, the script will create an empty file with that name when done (use this in conjunction with the wait() method). Returns the jobid of the submitted job."""
         cmdline = submitCmd
@@ -738,6 +769,45 @@ Returns the command's output without the trailing \n."""
             cmdline = cmdline + " -p " + prefix
         cmdline = cmdline + " " + scriptAndArgs
         return self.execute(cmdline)
+
+# Methods section
+
+    def addMethods(self, text):
+        text = self.parseReferences(text)
+        self.methods.append(text)
+
+    def processRef(self, text):
+        pieces = text.split("|")
+        ref = pieces[0].strip()
+        for piece in pieces:
+            piece = piece.strip()
+            if piece.startswith("doi:"):
+                doi = piece[4:]
+                ref += " | doi: <A href='http://dx.doi.org/{}'>{}</A>".format(doi, doi)
+            elif piece.startswith("pmid:"):
+                pmid = piece[5:]
+                ref += " | PubMed: <A href='http://www.ncbi.nlm.nih.gov/pubmed/?term={}'>{}</A>".format(pmid, pmid)
+        return ref
+
+    def parseReferences(self, text):
+        newtext = ""
+        beg = 0
+        while True:
+            p = text.find("[", beg)
+            if p == -1:
+                newtext += text[beg:]
+                break
+            p2 = text.find("]", p)
+            if p2 == -1:
+                newtext += text[beg:]
+                break
+            frag = text[beg:p]
+            ref = text[p+1:p2]
+            self.references.append(self.processRef(ref))
+            self.nreferences += 1
+            newtext += "{} [{}]".format(frag, self.nreferences)
+            beg = p2+1
+        return newtext
 
 # Support for conversion to excel
 

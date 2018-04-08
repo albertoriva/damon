@@ -8,6 +8,7 @@ import sys
 import glob
 import fcntl
 import getpass
+import subprocess
 from datetime import datetime
 
 class Submit():
@@ -19,11 +20,13 @@ class Submit():
     array    = None
     comment  = None
     queue    = None
-    coptions = None            # From cmdline -o option
+    coptions = []            # From cmdline -o option
     foptions = None            # From confFile
 
     confFile  = ".sbatchrc"
     logFile   = os.path.dirname(__file__) + "/../lib/submit.log"
+    dbFile    = os.path.dirname(__file__) + "/../lib/sdb/submit.db"
+    useDB     = True
     trueArgs  = []
     afterArgs = []
 
@@ -94,7 +97,10 @@ Submit options (should be BEFORE script name):
 
  -q queue     | Passed to {sub} as the -A argument, to specify a destination queue.
 
- -t arrspec   | Passed to {sub} as the -a argument, to specify a job array.
+ -t arrspec   | Passed to {sub} as the -a argument, to specify a job array. For
+              | example: "-t 0-15%4" will run an array of 16 jobs, numbered from
+              | 0 to 15, with the constraint that at most 4 of them will run at
+              | the same time.
 
  -o options   | Pass `options' to the {sub} command-line. The options should be 
               | separated by commas, with no spaces between them. For example: 
@@ -195,7 +201,7 @@ Configuration:
                     self.array = a
                     next = ""
                 elif next == "-o":
-                    self.coptions = a
+                    self.coptions.append(a.replace(",", " "))
                     next = ""
                 elif next == "-lib":
                     self.scriptLibrary = a
@@ -261,7 +267,7 @@ Configuration:
         if not os.path.isfile(scriptName):
             scriptName = self.scriptLibrary + "/" + scriptName
             if not os.path.isfile(scriptName):
-                sys.stderr.write("Error: script `{}' not found either in current directory or in script library!\n(Script library: {})\n".format(self.trueArgs[0], self.scriptLibrary))
+                sys.stderr.write("Error: script `{}' not found either in current directory or in script library!\n(Script library: {})\n".format(scriptName, self.scriptLibrary))
                 return (False, False)
         if self.trueArgs:
             decName = self.trueArgs[0] + ".IN"
@@ -274,7 +280,7 @@ Configuration:
         if self.array:
             cmdline += " -o {}.o%A_%a -e {}.e%A_%a -a {}".format(name, name, self.array)
         else:
-            cmdline += " -o {}.o%j -e {}.o%j".format(name, name)
+            cmdline += " -o {}.o%j -e {}.e%j".format(name, name)
         if self.comment:
             cmdline += ' --comment "{}"'.format(self.comment)
         if self.afterArgs:
@@ -285,8 +291,15 @@ Configuration:
         if self.foptions:
             cmdline += " " + self.foptions
         if self.coptions:
-            cmdline += " " + self.coptions
+            cmdline += " " + " ".join(self.coptions)
         return cmdline + " {} {}".format(name, " ".join(self.trueArgs[1:]))
+
+    def doCollect(self, jobid, name, arg1):
+        cmdline = "scollect.py submit -db {} {} {} {}".format(self.dbFile, jobid, name, arg1)
+        try:
+            subprocess.check_output(cmdline, shell=True)
+        except:
+            pass
 
     def main(self):
         (origScript, decScript) = self.resolveScriptName(self.trueArgs[0])
@@ -300,7 +313,15 @@ Configuration:
             cmdline = self.makeCmdline(toRun)
             sys.stderr.write("Executing: " + cmdline + "\n")
             if not self.dry:
-                os.system(cmdline)
+                #os.system(cmdline)
+                jobid = subprocess.check_output(cmdline, shell=True).rstrip("\n")
+                if self.useDB:
+                    if len(self.trueArgs) > 1:
+                        arg1 = self.trueArgs[1]
+                    else:
+                        arg1 = ""
+                    self.doCollect(jobid, toRun, arg1)
+                sys.stdout.write(jobid + "\n")
             self.writeLogEntry(toRun)
             if self.decorate and not self.debug:
                 os.remove(decScript)
@@ -381,7 +402,7 @@ class SubmitPBS(Submit):
         if self.foptions:
             cmdline += " " + self.foptions
         if self.coptions:
-            cmdline += " " + self.coptions
+            cmdline += " " + " ".join(self.coptions)
 
         return cmdline + " " + " ".join(self.trueArgs)
 

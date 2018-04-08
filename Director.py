@@ -3,6 +3,7 @@
 
 import sys
 import importlib
+from inspect import getmro
 
 class Director():
     """This class coordinates the execution of the pipeline."""
@@ -11,6 +12,7 @@ class Director():
     steplist = []               # Names of steps
     steps = []                  # Actual step objects
     registry = {}
+    stopAt = ""
 
     def __init__(self, actor, library="Library"):
         self.actor = actor
@@ -20,9 +22,25 @@ class Director():
         if type(library).__name__ == 'str':
             library = [library]
         for libname in library:
-
             lib = importlib.import_module(libname)
-            self.registry.update(lib.REGISTRY)
+            libdict = self.makeLibraryDict(lib)
+            sys.stdout.write("{} Lines loaded from library {}\n".format(len(libdict), libname))
+            #self.registry.update(lib.REGISTRY)
+            self.registry.update(libdict)
+
+    def makeLibraryDict(self, lib):
+        """Collect all classes that are a subclass of Line in `lib'. Returns
+a dictionary with the tag attribute of each class as the key."""
+        libdict = {}
+        lc = lib.Line
+        for cname in dir(lib):
+            x = getattr(lib, cname)
+            if x == lc:
+                continue
+            if type(x).__name__ == 'classobj' and lc in getmro(x):
+                    #print "{} {}".format(x, x.name)
+                libdict[x.tag] = x
+        return libdict
 
     def setSteps(self, steplist):
         """Set the list of steps to be performed by this director to `steplist'. Steplist
@@ -54,6 +72,8 @@ can be either a list of strings or a string containing comma-separated step name
     def step(self, key, **properties):
         if self.stepPresent(key):
             self.add(key, dry=self.stepDry(key), **properties)
+        else:
+            print "[Unused step: " + key + "]"
 
     def add(self, key, **properties):
         line = None
@@ -82,18 +102,8 @@ from `startkey' onwards will be set to not-dry."""
                 s.dry = dry
 
     def stopAt(self, stopkey):
-        """Set all steps after `stopkey' to dry."""
-        if stopkey:
-            print "Stopping at {}".format(stopkey)
-            ok = False
-            for s in self.steps:
-                # print s.key
-                if ok:
-                    # print "Setting {} to dry".format(s.name)
-                    s.dry = True
-                elif s.key == stopkey:
-                    # print "Found {}".format(s.key)
-                    ok = True
+        """Stop the pipeline after executing step `stopkey'."""
+        self.stopAt = stopkey
 
     def showSteps(self):
         print "Ready to run the following steps:"
@@ -107,9 +117,15 @@ from `startkey' onwards will be set to not-dry."""
             except KeyboardInterrupt:
                 print "\nExecution cancelled."
                 return False
+        else:
+            return True
 
     def run(self, ACT, title):
         """Top-level method to run the pipeline."""
+
+        self.startAt(ACT.getConf("startAt"))
+        self.stopAt(ACT.getConf("stopAt"))
+
         if self.showSteps():
 
             ACT.script(ACT.title, title)
@@ -122,16 +138,21 @@ from `startkey' onwards will be set to not-dry."""
 
     def PerformAll(self, method, immediatestop=False):
         good = True
+        doit = True
         for l in self.steps:
-            self.actor.log.log("Director: performing {} on `{}'.", method, l.name)
-            m = getattr(l, method)
-            f = m()
-            if not f:
-                sys.stderr.write("Error in {}: {}: {}\n".format(method, l.name, l.status))
-                if immediatestop:
-                    return False
-                else:
-                    good = False
+            if doit:
+                self.actor.log.log("Director: performing {} on `{}'.", method, l.name)
+                m = getattr(l, method)
+                f = m()
+                if not f:
+                    self.actor.log.log("Error in {}: {}: {}".format(method, l.name, l.status))
+                    if immediatestop:
+                        return False
+                    else:
+                        good = False
+                if l.key == self.stopAt:
+                    self.actor.log.log("Stop requested at step {}.".format(l.key))
+                    doit = False
         return good
 
     def VerifyAll(self):
@@ -160,4 +181,4 @@ from `startkey' onwards will be set to not-dry."""
             return False
         if not self.ReportAll():
             return False
-
+        self.actor.complete = True

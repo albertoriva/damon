@@ -125,6 +125,17 @@ class SampleCollection():
                 return c
         return None
 
+    def conditionNumSamples(self, name):
+        """Return the number of samples for condition `name'."""
+        if type(name).__name__ == 'str':
+            c = self.findCondition(name)
+        else:
+            c = name
+        if c == None:
+            return None
+        else:
+            return len(c['samples'])
+
     def conditionSamples(self, name, role='default'):
         """Return all samples for condition `name'. By default, only samples
 with 'default' role are returned. The `role' argument can be used to return
@@ -320,12 +331,12 @@ referenced in conditions should exist, all samples or conditions referenced in c
         
         ## Check fastq files in readsets
         for rs in self.readsets:
-            if not os.path.isfile(rs['left']):
+            if not (os.path.isfile(rs['left']) or os.path.islink(rs['left'])):
                 good = False
                 if verbose:
                     print "Readset {} references missing file {}".format(rs['name'], rs['left'])
             if rs['paired']:
-                if not os.path.isfile(rs['right']):
+                if not (os.path.isfile(rs['right']) or os.path.islink(rs['left'])):
                     good = False
                     if verbose:
                         print "Readset {} references missing file {}".format(rs['name'], rs['right'])

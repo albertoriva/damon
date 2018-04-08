@@ -82,14 +82,15 @@ class Args():
             try:
                 execfile(filename, globals(), locals())
             except Exception as e:
-                print "*** Script terminated with error: {}".format(e)
+                msg = "*** Script terminated with error: {}".format(e)
+                ACT.log.log(msg)
                 good = False
             finally:
                 ACT._cleanup()
 
         # We're back to top-level directory, let's see
         # if user wants to zip the package
-        if good and self.zipfile:
+        if ACT.complete and good and self.zipfile:
             if self.zipfile == True:
                 self.zipfile = ACT.Name + ".zip"
             exclFile = ACT.dir + "/" + exFile
