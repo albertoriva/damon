@@ -107,6 +107,36 @@ class FileError(ActorError):
         else:
             return "Error file {} does not exist or is not readable.".format(self.filename)
 
+class FileTooSmall(FileError):
+    filename = ""
+    megs = 1
+
+    def __init__(self, filename, megs, step=False):
+        self.filename = filename
+        self.megs = megs
+        self.step = step
+
+    def __str__(self):
+        msg = "Error: something went wrong"
+        if self.step:
+            msg = msg + " in step " + self.step
+        return msg + " - file `{}' is smaller than {} Mb.".format(self.filename, self.megs)
+
+class FileTooShort(FileError):
+    filename = ""
+    lines = 1
+
+    def __init__(self, filename, lines, step=False):
+        self.filename = filename
+        self.lines = lines
+        self.step = step
+
+    def __str__(self):
+        msg = "Error: something went wrong"
+        if self.step:
+            msg = msg + " in step " + self.step
+        return msg + " - file `{}' is shorter than {} lines.".format(self.filename, self.lines)
+
 # Main class
 
 class Actor():
@@ -295,10 +325,6 @@ Returns True if successful, signals an error otherwise."""
         if os.path.isfile(p):
             return True
         else:
-            if step:
-                msg = "Error in {} step: file {} does not exist.\n".format(step, p)
-            else:
-                msg = "Error: file {} does not exist.\n".format(p)
             raise FileError(p, step)
 
     def fileLines(self, filename, skipchar=None):
@@ -314,6 +340,26 @@ only counts lines that do NOT start with that charachter."""
         else:
             return None
 
+    def checkFileSize(self, p, megs=1, step=False):
+        """Checks that the file indicated by pathname `p' exists and is larger than `megs' 
+megabytes (defaulting to 1). Returns True if successful, signals an error otherwise."""
+        if not os.path.isfile(p):
+            raise FileError(p, step)
+        fs = os.path.getsize(p)
+        if fs < megs * 1048576:
+            raise FileTooSmall(p, megs, step)
+        return True
+
+    def checkFileLength(self, p, lines=1, skipchar=None, step=False):
+        """Checks that the file indicated by pathname `p' exists and contains more than 
+`lines' lines (defaulting to 1). Returns True if successful, signals an error otherwise."""
+        if not os.path.isfile(p):
+            raise FileError(p, step)
+        if self.fileLines(p, skipchar=skipchar) >= lines:
+            return True
+        else:
+            raise FileTooShort(p, lines, step)
+
 # Support for configuration files
 
     def loadConfiguration(self, filename):
@@ -327,6 +373,7 @@ only counts lines that do NOT start with that charachter."""
             if self.Conf.has_section("Include"):
                 for (label, incfile) in self.Conf.items("Include"):
                     if os.path.isfile(incfile):
+                        sys.stderr.write("  (including conf file {})\n".format(incfile))
                         self.Conf.read(incfile)
 
             # Set standard attributes

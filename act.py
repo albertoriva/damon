@@ -22,6 +22,9 @@ def getScriptClass(filename):
     else:
         return "Actor"
 
+def show(msg, *args):
+    sys.stdout.write(msg.format(*args))
+
 # Main
 
 class Args():
@@ -52,7 +55,7 @@ class Args():
         if self.script == None:
             return False
         if not os.path.isfile(self.script):
-            print "Script file `{}' not found.".format(self.script)
+            show("Script file `{}' not found.", self.script)
             return False
         return True
 
@@ -82,15 +85,19 @@ class Args():
             try:
                 execfile(filename, globals(), locals())
             except Exception as e:
-                msg = "*** Script terminated with error: {}".format(e)
+                msg = "*** Script terminated with the following error:\n*** {}\n".format(e)
+                show(msg)
                 ACT.log.log(msg)
                 good = False
             finally:
                 ACT._cleanup()
 
+        if not good:
+            sys.exit(2)
+
         # We're back to top-level directory, let's see
         # if user wants to zip the package
-        if ACT.complete and good and self.zipfile:
+        if ACT.complete and self.zipfile:
             if self.zipfile == True:
                 self.zipfile = ACT.Name + ".zip"
             exclFile = ACT.dir + "/" + exFile
@@ -101,13 +108,13 @@ class Args():
             if os.path.isfile(exclFile):
                 zipcmd = ["-x@" + exclFile, "-x", exclFile] + zipcmd
             zipcmd = ["zip"] + zipcmd
-            print zipcmd
-            print "Creating ZIP file {}...".format(self.zipfile)
+            #print zipcmd
+            show("Creating ZIP file {}...\n", self.zipfile)
             subprocess.call(zipcmd)
-            print "ZIP file {} created.".format(self.zipfile)
+            show("ZIP file {} created.\n", self.zipfile)
 
 def usage():
-    print """
+    show("""
 Usage: {} [-d] [-y] [-z zipFile] [-Z] scriptName [arguments...]
 
 Executes Actor script "scriptName" with the specified arguments. Options:
@@ -121,15 +128,19 @@ Executes Actor script "scriptName" with the specified arguments. Options:
                is printed). Also disables -z.
   -y         | Answer "yes" to all questions (unattended mode).
 
-Copyright (c) 2015-2017, A. Riva (ariva@ufl.edu)
+The script returns error code 0 if everything was OK; 1 if this help message
+was printed, and 2 in case of any error. 
+
+Copyright (c) 2015-2018, A. Riva (ariva@ufl.edu)
 University of Florida
-""".format(os.path.split(sys.argv[0])[1])
+""", os.path.split(sys.argv[0])[1])
 
 if __name__ == "__main__":
     
     A = Args()
     if A.parse(sys.argv[1:]):
         A.act()
+        sys.exit(0)
     else:
         usage()
-
+        sys.exit(1)

@@ -160,6 +160,18 @@ only BAM files for samples with 'default' role are returned. The `role' argument
 to return samples with a different role, or all if `role' is None."""
         return [ s[key] for s in self.conditionSamples(name, role=role) ]
 
+    def conditionsString(self):
+        return ",".join([ c['name'] for c in self.conditions ])
+
+    def factorsString(self):
+        idx = 1
+        factors = []
+        for c in self.conditions:
+            for s in c['samples']:
+                factors.append(str(idx))
+            idx += 1
+        return ",".join(factors)
+
 ### Samples
 
     def initializeSamples(self):

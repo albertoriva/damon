@@ -11,7 +11,7 @@ usage() {
   echo
   echo "For regular usage, call $prog with the name of a"
   echo "configuration file as its argument. Using '-d' will"
-  echo "call $prog in debug mode, and with no zip file creation"
+  echo "call $prog in debug mode (and with no zip file creation"
   echo "at the end)."
   echo
   echo "The '-y' option causes the script to run in unattended"
@@ -26,7 +26,7 @@ usage() {
   echo "The '-h' option displays a short description of the program "
   echo "and provides an example configuration file."
   echo
-  echo "© 2017, A. Riva, ICBR Bioinformatics, University of Florida."
+  echo "© 2015-2018, A. Riva, ICBR Bioinformatics, University of Florida."
 }
 
 newconf() {
@@ -36,12 +36,12 @@ newconf() {
 ## Main starts here
 
 case $prog in 
-  rnaseq|chipseq|atacseq|generep|generep2|dmap2|testing|snpcall|ma)
+  rnaseq|chipseq|atacseq|generep|generep2|dmap2|testing|snpcall|ma|scell)
     script=${PIPELINE_HOME}/${prog}.py
     ;;
   *)
     echo "Unknown script ${prog}."
-    echo "Known scripts: rnaseq, chipseq, atacseq, generep2, dmap2, ma, snpcall, testing"
+    echo "Known scripts: rnaseq, chipseq, atacseq, generep2, dmap2, ma, snpcall, scell, testing"
     exit 1
     ;;
 esac
@@ -78,11 +78,8 @@ while getopts :hndy ARG; do
 	    conffile=${name}.conf
 	    echo Writing $conffile
 	    newconf > $conffile
-	    echo -n "Would you like to run $prog with this configuration file (y/n)? "; read ans
-	    if [ "$ans" == "y" ]
-	    then
-		$0 $conffile
-	    fi
+	    echo "Please edit this configuration file to fit your needs,"
+	    echo "then run the pipeline with: $prog $conffile."
 	    exit
 	    ;;
 	d)
