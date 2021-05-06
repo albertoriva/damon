@@ -46,6 +46,10 @@ class Waiter():
         """A base Waiter is successful when its target file exists."""
         return os.path.exists(self.filename)
 
+    def status(self):
+        """Returns the overall success status of the processes we waited for."""
+        return True
+
     def delete(self):
         os.remove(self.filename)
 
@@ -87,6 +91,21 @@ the pattern in `filename' is greater than or equal to `wanted'."""
         self.found = len(glob.glob(self.filename))
         return (self.found >= self.wanted)
         
+    def status(self):
+        """We assume that the first line of the file contains the return code. Returns
+the maximum return code found."""
+        stfiles = glob.glob(self.filename)
+        st = 0
+        for stfile in stfiles:
+            with open(stfile, "r") as f:
+                l = f.readline()
+                try:
+                    ret = int(l)
+                    st = max(st, ret)
+                except ValueError:
+                    pass
+        return st
+
     def delete(self):
         for f in glob.glob(self.filename):
             os.remove(f)
@@ -203,7 +222,7 @@ class Actor():
 
     def _addToExclude(self, filename):
         with open(self.excludeFile, "a") as out:
-            out.write("{}/{}\n".format(self.Name, filename))
+            out.write("{}\n".format(filename))
         return filename
 
     def _addToInclude(self, *filenames):
@@ -312,6 +331,7 @@ stylesheets, logos)."""
     def checkPath(self, p, step=False):
         """Checks that the file indicated by pathname p exists and is readable.
 Returns fixPath(p) if successful, signals an error otherwise."""
+        # print "checking path {}".format(p)
         if p == None:
             return p
         elif os.path.isfile(p) or os.path.islink(p):
@@ -331,14 +351,15 @@ Returns True if successful, signals an error otherwise."""
         """Returns the number of lines in `filename' (as a string). If `skipchar' is specified,
 only counts lines that do NOT start with that charachter."""
         if skipchar:
-            r = self.shell("grep -v ^{} {} | wc -l -".format(skipchar, filename))
+            r = self.shell("grep -v ^{} {} | grep -c ^".format(skipchar, filename))
         else:
-            r = self.shell("wc -l " + filename)
-        p = r.find(" ")
-        if p > 0:
-            return r[:p]
-        else:
-            return None
+            r = self.shell("grep -c ^ " + filename)
+        return r
+
+    def fileColumns(self, filename, delimiter='\t'):
+        with open(filename, "r") as f:
+            c = csv.reader(f, delimiter=delimiter)
+            return len(c.next())
 
     def checkFileSize(self, p, megs=1, step=False):
         """Checks that the file indicated by pathname `p' exists and is larger than `megs' 
@@ -399,7 +420,10 @@ value of default (None if unspecified). `section' defaults to General."""
     
     def getConfInt(self, entry, section="General", default=None):
         try:
-            return int(self.Conf.get(section, entry))
+            if self.Conf.has_section(section):
+                return int(self.Conf.get(section, entry))
+            else:
+                return default
         except ConfigParser.NoOptionError:
             return default
         except ValueError:
@@ -407,7 +431,10 @@ value of default (None if unspecified). `section' defaults to General."""
 
     def getConfFloat(self, entry, section="General", default=None):
         try:
-            return float(self.Conf.get(section, entry))
+            if self.Conf.has_section(section):
+                return float(self.Conf.get(section, entry))
+            else:
+                return default
         except ConfigParser.NoOptionError:
             return default
         except ValueError:
@@ -417,7 +444,10 @@ value of default (None if unspecified). `section' defaults to General."""
         """Return the boolean value for `entry' in `section', if present, or the
 value of default (None if unspecified). `section' defaults to General."""
         try:
-            return self.Conf.getboolean(section, entry)
+            if self.Conf.has_section(section):
+                return self.Conf.getboolean(section, entry)
+            else:
+                return default
         except ConfigParser.NoOptionError:
             return default
 
@@ -425,8 +455,11 @@ value of default (None if unspecified). `section' defaults to General."""
         """Return the value for `entry' in `section' as a comma-delimited list.
 `section' defaults to General."""
         try:
-            a = self.Conf.get(section, entry)
-            return [ w.strip(" ") for w in a.split(",") ]
+            if self.Conf.has_section(section):
+                a = self.Conf.get(section, entry)
+                return [ w.strip(" ") for w in a.split(",") ]
+            else:
+                return default
         except ConfigParser.NoOptionError:
             return default
 
@@ -558,6 +591,8 @@ can be either a list of strings or a string containing comma-separated step name
     def wait(self, wanted, delete=True):
         """Wait until all the files in the `wanted' list get created. Returns True when all specified files exist. This can be used to check for the completion of a background script. If `delete' is True, the files are deleted before returning."""
 
+        status = True
+
         # If a single filename was passed, turn it into a list
         if type(wanted).__name__ != 'list':
             wanted = [wanted]
@@ -566,24 +601,34 @@ can be either a list of strings or a string containing comma-separated step name
         nwanted = sum(w.wanted for w in wanted)
         wmsg   = ", ".join([ w.str() for w in wanted])
         self.messagelf("\nWaiting for: " + wmsg)
-        while wanted != []:
+        # print "Initial: {}".format(wanted)
+        while wanted:
             newmsg = ", ".join([ w.str() for w in wanted])
             if newmsg != wmsg:
                 wmsg = newmsg
                 self.messagelf("Waiting for: " + wmsg)
+            newwanted = []
             for w in wanted:
                 success = w.success()
                 if success:
+                    st = w.status()
+                    if st != 0:
+                        self.messagelf("Warning: one of {} returned error code {}".format(w.filename, st))
+                        status = False
                     if delete:
                         w.delete()
                     wanted.remove(w)
-            if wanted != []:
+                else:
+                    newwanted.append(w)
+            wanted = newwanted
+            # print "Now: {}".format(wanted)
+            if wanted:
                 time.sleep(5)
         self.messagelf("{} jobs completed.".format(nwanted))
         self.message("\n")
-        return True
+        return status
 
-    def copy(self, filename, dest="", exclude=False):
+    def copy(self, filename, dest="", exclude=False, symlink=False):
         """Copy `filename' to the current directory. The filename is preserved unless `dest' is specified, in which case it is used as the new filename."""
         if dest == "":
             dest = self.fullname(filename)
@@ -615,6 +660,15 @@ can be either a list of strings or a string containing comma-separated step name
         self.message("Deleting: {}", pattern)
         subprocess.call("rm " + pattern, shell=True)
 
+    def initFiledesc(self):
+        os.remove("FILEDESC")
+
+    def fileDesc(self, filename, desc, *args):
+        with open("FILEDESC", "a") as out:
+            out.write("{}\t{}\n".format(filename, desc.format(*args)))
+
+### Execution
+
     def begin(self, timestamp=False, copyScript=False, copyConf=True, html="index.html"):
         """Start execution of the script. Creates a directory where result files will be written, and chdirs to it. If `timestamp' is True, the directory name contains the current timestamp. If `copyScript' is True, the script is copied to the results directory. If copyConf is True, the configuration file is copied to the results directory. The report is written to the HTML file specified by `html'."""
 
@@ -627,7 +681,9 @@ can be either a list of strings or a string containing comma-separated step name
         if os.path.exists(dirPath):
             if self.ask:
                 a = raw_input("The output directory already exists. Proceed anyway? (Y/n) ")
-                if a not in ['Y', 'y', '']:
+                if a == '' or a[0] in 'Yy':
+                    pass
+                else:
                     return False
         else:
             self.message("Creating output directory: {}", dirPath)
@@ -801,9 +857,11 @@ dictionaries, using the elements of `fields' as keys."""
             result.append(d)
         return result
 
-    def submit(self, scriptAndArgs, after=False, done=False, prefix=None, options=None):
+    def submit(self, scriptAndArgs, after=False, done=False, prefix=None, options=None, otherargs=None):
         """Submit a script to the SGE queue with the submit command. `scriptAndArgs' is a string containing the qsub script that should be submitted and its arguments. If `after' is specified, schedule this job to run after the one whose jobid is the value of `after'. If `done' is a filename, the script will create an empty file with that name when done (use this in conjunction with the wait() method). Returns the jobid of the submitted job."""
         cmdline = submitCmd
+        if otherargs:
+            cmdline += " " + otherargs
         if after:
             cmdline = cmdline + " -after " + after
         if done:
