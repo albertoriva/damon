@@ -106,7 +106,7 @@ class SampleCollection():
                     if not self.findSample(s):
                         self.addSample(s, role='default')
                 condinputs = self.getConf("inputs", section=c)
-                if condinputs != None:
+                if condinputs:
                     condinputs = splitCommas(condinputs)
                     condition['inputs'] = condinputs
                     for s in condinputs:
@@ -184,7 +184,7 @@ to return samples with a different role, or all if `role' is None."""
 
     def addSample(self, name, role='default'):
         # print "adding sample {} with role {}".format(name, role)
-        sample = {'name': name, 'role': role, 'readsets': self.parseReadsets(name)}
+        sample = { 'name': name, 'role': role, 'readsets': self.parseReadsets(name), 'batch': self.getConf("batch", name) or "A" }
         self.samples.append(sample)
         self.nsamples += 1
         return sample

@@ -11,6 +11,7 @@
 import sys
 import os.path
 import subprocess
+import traceback
 
 # Utils
 
@@ -33,6 +34,7 @@ class Args():
     zipfile = False
     debug = False
     ask = True
+    dry = False
 
     def parse(self, args):
         next = ""
@@ -48,6 +50,8 @@ class Args():
                 self.debug = True
             elif a == "-y":
                 self.ask = False
+            elif a == "-r":
+                self.dry = True
             elif self.script == None:
                 self.script = a
             else:
@@ -75,12 +79,19 @@ class Args():
         ACT.source = os.path.abspath(filename)
         ACT.Arguments = self.arguments
         ACT.ask = self.ask
+        ACT.dry = self.dry
         # print ACT.ask
         good = True
 
         if self.debug:
-            execfile(filename, globals(), locals())
-            ACT._cleanup()
+            try:
+                execfile(filename, globals(), locals())
+                ACT._cleanup()
+            except Exception as e:
+                bt = traceback.format_exc()
+                ACT.log.log(bt)
+                good = False
+                raise e
         else:
             try:
                 execfile(filename, globals(), locals())
@@ -94,7 +105,6 @@ class Args():
 
         if not good:
             sys.exit(2)
-
         # We're back to top-level directory, let's see
         # if user wants to zip the package
         if ACT.complete and self.zipfile:
@@ -127,6 +137,7 @@ Executes Actor script "scriptName" with the specified arguments. Options:
                (by default all errors are caught and only the error message 
                is printed). Also disables -z.
   -y         | Answer "yes" to all questions (unattended mode).
+  -r         | Dry mode: set all steps to dry run. A.k.a. "report-only" mode.
 
 The script returns error code 0 if everything was OK; 1 if this help message
 was printed, and 2 in case of any error. 

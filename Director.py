@@ -90,6 +90,11 @@ can be either a list of strings or a string containing comma-separated step name
             sys.stderr.write("Warning: no Line with key `{}'.\n".format(dkey))
         return line
 
+    def dryRun(self):
+        """Set all steps in this pipeline to dry."""
+        for s in self.steps:
+            s.dry = True
+
     def startAt(self, startkey):
         """Set all steps in this pipeline to dry, until `startkey' is reached. All steps
 from `startkey' onwards will be set to not-dry."""
@@ -126,8 +131,10 @@ from `startkey' onwards will be set to not-dry."""
         self.startAt(ACT.getConf("startAt"))
         self.stopAt(ACT.getConf("stopAt"))
 
-        if self.showSteps():
+        if ACT.dry:
+            self.dryRun()
 
+        if self.showSteps():
             ACT.script(ACT.title, title)
             if ACT.begin(timestamp=False):
                 ACT.initFiles()

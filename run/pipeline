@@ -3,16 +3,19 @@
 prog=$(basename $0)
 
 export PIPELINE_HOME=${HPC_DIBIGTOOLS_DIR}/../pipelines
-export PYTHONPATH=${PIPELINE_HOME}:${PYTHONPATH}
+export PYTHONPATH=${PIPELINE_HOME}:${HPC_DIBIGTOOLS_DIR}/python/:${PYTHONPATH}
 
 usage() {
-  echo "Usage: $prog [-d] [-n] [-y] <configuration-file> [options]"
+  echo "Usage: $prog [-d] [-r] [-n] [-y] <configuration-file> [options]"
   echo "       $prog -h"
   echo
   echo "For regular usage, call $prog with the name of a"
   echo "configuration file as its argument. Using '-d' will"
   echo "call $prog in debug mode (and with no zip file creation"
   echo "at the end)."
+  echo
+  echo "The '-r' options runs the pipeline in dry-run mode. Effectively"
+  echo "the same as prefixing all pipeline steps with -."
   echo
   echo "The '-y' option causes the script to run in unattended"
   echo "mode: it will not wait for user to press Enter before"
@@ -30,18 +33,18 @@ usage() {
 }
 
 newconf() {
-  source ${PIPELINE_HOME}/${prog}.confsample
+  source ${PIPELINE_HOME}/confsamples/${prog}.confsample
 }
 
 ## Main starts here
 
 case $prog in 
-  rnaseq|chipseq|atacseq|generep|generep2|dmap2|testing|snpcall|ma|scell)
+  rnaseq|chipseq|atacseq|generep2|dmap2|snpcall|ma|scell)
     script=${PIPELINE_HOME}/${prog}.py
     ;;
   *)
     echo "Unknown script ${prog}."
-    echo "Known scripts: rnaseq, chipseq, atacseq, generep2, dmap2, ma, snpcall, scell, testing"
+    echo "Known scripts: rnaseq, chipseq, atacseq, generep2, dmap2, ma, snpcall, scell"
     exit 1
     ;;
 esac
@@ -67,7 +70,7 @@ done
 
 ## Now parse command-line args
 
-while getopts :hndy ARG; do
+while getopts :hndyr ARG; do
     case $ARG in
 	n)			# New
 	    name=$conf
@@ -85,6 +88,9 @@ while getopts :hndy ARG; do
 	d)
 	    debug="-d"
 	    zip=""
+	    ;;
+	r)
+	    dry="-r"
 	    ;;
 	h)
 	    usage
@@ -112,7 +118,7 @@ if [ -f $conf ]
 then
   shift
   shift
-  act.py $debug $zip $yes $script $conf $*
+  act.py $debug $dry $zip $yes $script $conf $*
 else
   echo Error: file $conf not found.
   echo

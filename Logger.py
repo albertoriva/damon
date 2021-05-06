@@ -41,7 +41,10 @@ class Logger():
           self.echo = None
 
   def log(self, message, *args):
-      s = message.format(*args)
+      if args:
+          s = message.format(*args)
+      else:
+          s = message
       if self.out:
           self.out.write("{}\t{}\n".format(timestamp(), s))
           self.out.flush()

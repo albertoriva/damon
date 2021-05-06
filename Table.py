@@ -52,6 +52,38 @@ class P(TableCell):
     def toHTML(self, cls=""):
         return self.printCell("{:.2f}%".format(100.0 * self.value), cls=cls + " aright")
 
+class P3(TableCell):
+    """Percentage cell, printed as nn.ddd%, right-aligned."""
+
+    def __init__(self, v, div=None):
+        if div:
+            self.value = 1.0 * float(v) / float(div)
+        else:
+            self.value = float(v)
+
+    def toHTML(self, cls=""):
+        return self.printCell("{:.3f}%".format(100.0 * self.value), cls=cls + " aright")
+
+class PP(TableCell):
+    """Cell showing value and percentage of total, as 'xx (xx.xx%)', right-aligned."""
+
+    def __init__(self, v, div):
+        pct = 100.0 * float(v) / float(div)
+        self.value = "{:,} ({:.3f}%)".format(int(v), pct)
+
+    def toHTML(self, cls=""):
+        return self.printCell(self.value, cls=cls + " aright")
+
+class PP0(TableCell):
+    """Cell showing value and percentage of total, as 'xx (xx%)', right-aligned."""
+
+    def __init__(self, v, div):
+        pct = 100.0 * float(v) / float(div)
+        self.value = "{:,} ({}%)".format(int(v), int(pct))
+
+    def toHTML(self, cls=""):
+        return self.printCell(self.value, cls=cls + " aright")
+
 class A(TableCell):
     """Anchor cell, printed as hyperlink, centered."""
     href = ""
@@ -89,13 +121,17 @@ class N(TableCell):
 class D(TableCell):
     """Fancy number cell, printed with thousands separator, right-aligned."""
 
-    def __init__(self, v, cls=None):
+    def __init__(self, v, cls=None, bold=False):
         self.value = int(v)
+        self.bold = bold
         if cls:
             self.cls = cls
 
     def toHTML(self, cls=""):
-        return self.printCell("{:,}".format(self.value), cls=self.cls + cls + " aright")
+        if self.bold:
+            return self.printCell("<B>{:,}</B>".format(self.value), cls=self.cls + cls + " aright")
+        else:
+            return self.printCell("{:,}".format(self.value), cls=self.cls + cls + " aright")
 
 class F(TableCell):
     """Floating point number, two decimals, right-aligned."""
