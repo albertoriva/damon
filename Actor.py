@@ -888,10 +888,10 @@ dictionaries, using the elements of `fields' as keys."""
             piece = piece.strip()
             if piece.startswith("doi:"):
                 doi = piece[4:]
-                ref += " | doi: <A href='http://dx.doi.org/{}'>{}</A>".format(doi, doi)
+                ref += " | doi: <A href='https://doi.org/{}'>{}</A>".format(doi, doi)
             elif piece.startswith("pmid:"):
                 pmid = piece[5:]
-                ref += " | PubMed: <A href='http://www.ncbi.nlm.nih.gov/pubmed/?term={}'>{}</A>".format(pmid, pmid)
+                ref += " | PubMed: <A href='https://www.ncbi.nlm.nih.gov/pubmed/?term={}'>{}</A>".format(pmid, pmid)
         return ref
 
     def parseReferences(self, text):
