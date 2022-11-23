@@ -5,6 +5,9 @@ import sys
 import importlib
 from inspect import getmro
 
+PY3 = (sys.version_info.major == 3)
+CLASSID = "type" if PY3 else "classobj"
+
 class Director():
     """This class coordinates the execution of the pipeline."""
 
@@ -37,7 +40,7 @@ a dictionary with the tag attribute of each class as the key."""
             x = getattr(lib, cname)
             if x == lc:
                 continue
-            if type(x).__name__ == 'classobj' and lc in getmro(x):
+            if type(x).__name__ == CLASSID and lc in getmro(x):
                     #print "{} {}".format(x, x.name)
                 libdict[x.tag] = x
         return libdict
@@ -73,7 +76,7 @@ can be either a list of strings or a string containing comma-separated step name
         if self.stepPresent(key):
             self.add(key, dry=self.stepDry(key), **properties)
         else:
-            print "[Unused step: " + key + "]"
+            print("[Unused step: " + key + "]")
 
     def add(self, key, **properties):
         line = None
@@ -99,7 +102,7 @@ can be either a list of strings or a string containing comma-separated step name
         """Set all steps in this pipeline to dry, until `startkey' is reached. All steps
 from `startkey' onwards will be set to not-dry."""
         if startkey:
-            print "Starting at {}".format(startkey)
+            print("Starting at {}".format(startkey))
             dry = True
             for s in self.steps:
                 if s.key == startkey:
@@ -111,16 +114,19 @@ from `startkey' onwards will be set to not-dry."""
         self.stopAt = stopkey
 
     def showSteps(self):
-        print "Ready to run the following steps:"
+        print("Ready to run the following steps:")
         for s in self.steps:
-            print "{} {}".format("-" if s.dry else "+", s.name)
+            print("{} {}".format("-" if s.dry else "+", s.name))
         if self.actor.ask:
-            print "Press Enter to start execution."
+            print("Press Enter to start execution.")
             try:
-                raw_input()
+                if PY3:
+                    input()
+                else:
+                    raw_input()
                 return True
             except KeyboardInterrupt:
-                print "\nExecution cancelled."
+                print("\nExecution cancelled.")
                 return False
         else:
             return True

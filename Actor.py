@@ -16,10 +16,16 @@ import shutil
 import subprocess
 from datetime import date, datetime
 from tempfile import mkstemp
+from collections import defaultdict
 
-import ConfigParser
 import imageslider
 from Logger import Logger
+
+PY3 = (sys.version_info.major == 3)
+if PY3:
+    import configparser as cp
+else:
+    import ConfigParser as cp
 
 # Globals
 
@@ -162,15 +168,17 @@ class Actor():
     Name = "run"
     title = "Script"
     Project = "(no name)"
+    Pipeline = "??"
     Copyright = actCopyright
     Fields = {}
+    Info = {}
     Arguments = []
     Include = []                 # List of additional files to be copied in run directory
     Conf = None                  # ConfigParser object
     Steps = []                   # Steps the user wants to run
     Prefix = None                # Prefix for submit jobs
     log = Logger(None)           # To avoid errors in scripts that don't explicitly create one
-
+    
     # Runtime
     ask = True                   # If False, run in unattendend mode
     source = ""                  # Name of file containing script
@@ -190,6 +198,7 @@ class Actor():
     nreferences = 0              # Number of references
     complete = False             # Set to true for successful completion
     error = None                 # Set to an error message in case of errors
+    jobs = None                  # Dictionary of submitted jobs (key is task name, value is list of job IDs)
 
     # Internal methods (not meant to be called by user)
 
@@ -199,6 +208,8 @@ class Actor():
         self.Include = []
         self.tempfiles = []
         self.previousDir = ""
+        self.jobs = defaultdict(list)
+        self.Info = {}
 
     def _cleanup(self):
 
@@ -244,7 +255,7 @@ stylesheets, logos)."""
         # The end-of-line character at the end of the last line of output
         # is removed automatically.
         # NOTE: signals an error if the command returns a non-zero return code.
-        return subprocess.check_output(command.split(" ")).rstrip("\n")
+        return subprocess.check_output(command.split(" ")).decode().rstrip("\n")
 
     def _decodeAlign(self, align, i):
         """Decodes the character at position `i' in an align string `align' into the corresponding CSS style (for tables). If `align' is None, assume L at each position."""
@@ -348,13 +359,15 @@ Returns True if successful, signals an error otherwise."""
             raise FileError(p, step)
 
     def fileLines(self, filename, skipchar=None):
-        """Returns the number of lines in `filename' (as a string). If `skipchar' is specified,
+        """Returns the number of lines in `filename' (as an integer). If `skipchar' is specified,
 only counts lines that do NOT start with that charachter."""
+        if not os.path.isfile(filename):
+            return 0
         if skipchar:
-            r = self.shell("grep -v ^{} {} | grep -c ^".format(skipchar, filename))
+            r = self.shell("grep -c -v ^{} {}".format(skipchar, filename))
         else:
             r = self.shell("grep -c ^ " + filename)
-        return r
+        return int(r)
 
     def fileColumns(self, filename, delimiter='\t'):
         with open(filename, "r") as f:
@@ -387,7 +400,7 @@ megabytes (defaulting to 1). Returns True if successful, signals an error otherw
         """Load configuration file `filename'."""
         if os.path.isfile(filename):
             self.configFile = filename
-            self.Conf = ConfigParser.ConfigParser()
+            self.Conf = cp.ConfigParser()
             self.Conf.optionxform = str
             self.Conf.read(filename)
 
@@ -404,7 +417,7 @@ megabytes (defaulting to 1). Returns True if successful, signals an error otherw
 
             return self.Conf
         else:
-            print "Error: configuration file {} not found or not readable.".format(filename)
+            print("Error: configuration file {} not found or not readable.".format(filename))
             exit(1)
 
     def getConf(self, entry, section="General", default=None):
@@ -415,7 +428,7 @@ value of default (None if unspecified). `section' defaults to General."""
                 return self.Conf.get(section, entry)
             else:
                 return default
-        except ConfigParser.NoOptionError:
+        except cp.NoOptionError:
             return default
     
     def getConfInt(self, entry, section="General", default=None):
@@ -424,7 +437,7 @@ value of default (None if unspecified). `section' defaults to General."""
                 return int(self.Conf.get(section, entry))
             else:
                 return default
-        except ConfigParser.NoOptionError:
+        except cp.NoOptionError:
             return default
         except ValueError:
             return default
@@ -435,7 +448,7 @@ value of default (None if unspecified). `section' defaults to General."""
                 return float(self.Conf.get(section, entry))
             else:
                 return default
-        except ConfigParser.NoOptionError:
+        except cp.NoOptionError:
             return default
         except ValueError:
             return default
@@ -448,7 +461,7 @@ value of default (None if unspecified). `section' defaults to General."""
                 return self.Conf.getboolean(section, entry)
             else:
                 return default
-        except ConfigParser.NoOptionError:
+        except cp.NoOptionError:
             return default
 
     def getConfList(self, entry, section="General", default=[]):
@@ -460,7 +473,7 @@ value of default (None if unspecified). `section' defaults to General."""
                 return [ w.strip(" ") for w in a.split(",") ]
             else:
                 return default
-        except ConfigParser.NoOptionError:
+        except cp.NoOptionError:
             return default
 
     def getConfAll(self, section):
@@ -490,12 +503,12 @@ can be either a list of strings or a string containing comma-separated step name
     def step(self, wanted):
         if wanted in self.Steps:
             if not wanted in self.notifiedSteps: # should we notify?
-                print "Performing step `{}'.".format(wanted)
+                print("Performing step `{}'.".format(wanted))
                 self.notifiedSteps.append(wanted)
             return True
         else:
             if not wanted in self.notifiedSteps:
-                print "Skipping step `{}'.".format(wanted)
+                print("Skipping step `{}'.".format(wanted))
                 self.notifiedSteps.append(wanted)
             return False
 
@@ -557,7 +570,7 @@ can be either a list of strings or a string containing comma-separated step name
             other = [other]
         if not os.path.isfile(filename):
             if warn:
-                sys.stderr.write("File `{}' does not exist or is not readable.".format(filename))
+                sys.stderr.write("File `{}' does not exist or is not readable.\n".format(filename))
             return True             # missing                                                                                                                            
         this = os.path.getmtime(filename)
         for o in other:
@@ -565,13 +578,16 @@ can be either a list of strings or a string containing comma-separated step name
                 that = os.path.getmtime(o)
                 if this < that:
                     if warn:
-                        sys.stderr.write("File `{}' is older than file `{}'.".format(filename, o))
+                        sys.stderr.write("File `{}' is older than file `{}'.\n".format(filename, o))
                     return True
         return False
     
     def mkdir(self, name):
         if not os.path.exists(name):
-            os.makedirs(name)
+            try:
+                os.makedirs(name)
+            except:
+                pass
 
     # The following few methods deal with waiting for things to happen...
 
@@ -680,7 +696,10 @@ can be either a list of strings or a string containing comma-separated step name
 
         if os.path.exists(dirPath):
             if self.ask:
-                a = raw_input("The output directory already exists. Proceed anyway? (Y/n) ")
+                if PY3:
+                    a = input("The output directory already exists. Proceed anyway? (Y/n) ")
+                else:
+                    a = raw_input("The output directory already exists. Proceed anyway? (Y/n) ")
                 if a == '' or a[0] in 'Yy':
                     pass
                 else:
@@ -709,7 +728,7 @@ can be either a list of strings or a string containing comma-separated step name
         os.chdir(dirPath)
         self.message("Current directory now: {}", dirPath)
         for inc in self.Include:
-            shutil.copy(inc, ".")
+            shutil.copyfile(inc, os.path.split(inc)[1])
         self.preamble(self.out)
         return True
 
@@ -834,9 +853,9 @@ Returns the command's output without the trailing \n."""
         if self.log:
             self.log.log("Executing: {}", cmd)
         try:
-            return subprocess.check_output(cmd, shell=True).rstrip("\n")
+            return subprocess.check_output(cmd, shell=True).decode().rstrip("\n")
         except subprocess.CalledProcessError as cpe:
-            return cpe.output.rstrip("\n")
+            return cpe.output.decode().rstrip("\n")
 
     def query(self, database, query, *args):
         """Executes `query' on sqlite3 database `database'; returns results as a list of lists."""
@@ -857,8 +876,8 @@ dictionaries, using the elements of `fields' as keys."""
             result.append(d)
         return result
 
-    def submit(self, scriptAndArgs, after=False, done=False, prefix=None, options=None, otherargs=None):
-        """Submit a script to the SGE queue with the submit command. `scriptAndArgs' is a string containing the qsub script that should be submitted and its arguments. If `after' is specified, schedule this job to run after the one whose jobid is the value of `after'. If `done' is a filename, the script will create an empty file with that name when done (use this in conjunction with the wait() method). Returns the jobid of the submitted job."""
+    def submit(self, scriptAndArgs, after=False, done=False, prefix=None, options=None, otherargs=None, task=None):
+        """Submit a script to the SGE queue with the submit command. `scriptAndArgs' is a string containing the qsub script that should be submitted and its arguments. If `after' is specified, schedule this job to run after the one whose jobid is the value of `after'. If `done' is a filename, the script will create a file with that name when done (use this in conjunction with the wait() method). Returns the jobid of the submitted job."""
         cmdline = submitCmd
         if otherargs:
             cmdline += " " + otherargs
@@ -873,7 +892,10 @@ dictionaries, using the elements of `fields' as keys."""
         if prefix != None:
             cmdline = cmdline + " -p " + prefix
         cmdline = cmdline + " " + scriptAndArgs
-        return self.execute(cmdline)
+        jobid = self.execute(cmdline)
+        if task:
+            self.jobs[task].append(jobid)
+        return jobid
 
 # Methods section
 

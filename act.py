@@ -13,6 +13,8 @@ import os.path
 import subprocess
 import traceback
 
+PY3 = (sys.version_info.major == 3)
+
 # Utils
 
 def getScriptClass(filename):
@@ -25,6 +27,14 @@ def getScriptClass(filename):
 
 def show(msg, *args):
     sys.stdout.write(msg.format(*args))
+
+def execute(filename):
+    sys.stderr.write("Executing: {}\n".format(filename))
+    if PY3:
+        with open(filename, "r") as f:
+            exec(f.read(), globals(), locals())
+    else:
+        execfile(filename, globals(), locals())
 
 # Main
 
@@ -66,6 +76,7 @@ class Args():
 # Top-level functions
 
     def act(self):
+        global ACT
         filename = self.script
         className = getScriptClass(filename)
         # print "Importing {}".format(className)
@@ -85,7 +96,7 @@ class Args():
 
         if self.debug:
             try:
-                execfile(filename, globals(), locals())
+                execute(filename)
                 ACT._cleanup()
             except Exception as e:
                 bt = traceback.format_exc()
@@ -94,7 +105,7 @@ class Args():
                 raise e
         else:
             try:
-                execfile(filename, globals(), locals())
+                execute(filename)
             except Exception as e:
                 msg = "*** Script terminated with the following error:\n*** {}\n".format(e)
                 show(msg)

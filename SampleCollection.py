@@ -5,7 +5,12 @@
 
 import sys
 import os.path
-import ConfigParser
+
+PY3 = (sys.version_info.major == 3)
+if PY3:
+    import configparser as cp
+else:
+    import ConfigParser as cp
 
 # Utility
 
@@ -54,17 +59,17 @@ class SampleCollection():
         self.parseContrasts()
 
     def describe(self):
-        print "{} conditions: {}".format(self.nconditions, self.conditions)
-        print "{} samples:    {}".format(self.nsamples, self.samples)
-        print "{} readsets:   {}".format(self.nreadsets, self.readsets)
-        print "{} contrasts:  {}".format(self.ncontrasts, self.contrasts)
+        print("{} conditions: {}".format(self.nconditions, self.conditions))
+        print("{} samples:    {}".format(self.nsamples, self.samples))
+        print("{} readsets:   {}".format(self.nreadsets, self.readsets))
+        print("{} contrasts:  {}".format(self.ncontrasts, self.contrasts))
 
     def getConf(self, entry, section="General", required=False):
         try:
             return self.conf.get(section, entry)
-        except ConfigParser.NoOptionError:
+        except cp.NoOptionError:
             if required:
-                print "Configuration error: entry {} is required in section [{}]".format(entry, section)
+                print("Configuration error: entry {} is required in section [{}]".format(entry, section))
                 sys.exit()
             else:
                 return None
@@ -81,7 +86,7 @@ class SampleCollection():
         if p == None:
             return p
         elif not os.path.isfile(p):
-            print "Error: file {} does not exist or is not readable.".format(p)
+            print("Error: file {} does not exist or is not readable.".format(p))
             sys.exit()
         else:
             return self.fixPath(p)
@@ -105,7 +110,7 @@ class SampleCollection():
                     # print "  sample: " + s
                     if not self.findSample(s):
                         self.addSample(s, role='default')
-                condinputs = self.getConf("inputs", section=c)
+                condinputs = self.getConf("inputs", section=c) or self.getConf("input", section=c)
                 if condinputs:
                     condinputs = splitCommas(condinputs)
                     condition['inputs'] = condinputs
@@ -284,7 +289,7 @@ to return samples with a different role, or all if `role' is None."""
     def splitContrast(self, c):
         p = c.find("^")
         if p == -1:
-            print "Configuration error: contrast `{}' should have the form testsample^controlsample.".format(c)
+            print("Configuration error: contrast `{}' should have the form testsample^controlsample.".format(c))
             sys.exit()
         test = c[:p]
         ctrl = c[p+1:]
@@ -302,16 +307,16 @@ to return samples with a different role, or all if `role' is None."""
             return None
 
     def showSamples(self):
-        print "{} total samples".format(self.nsamples)
+        print("{} total samples".format(self.nsamples))
         for s in self.samples:
-            print "\nSample '{}' ({} readsets)".format(s['name'], len(s['readsets']))
+            print("\nSample '{}' ({} readsets)".format(s['name'], len(s['readsets'])))
             for rs in s['readsets']:
                 if rs['paired']:
-                    print "  {}".format(rs['name'])
-                    print "    left = {}\n    right = {}".format(rs['left'], rs['right'])
+                    print("  {}".format(rs['name']))
+                    print("    left = {}\n    right = {}".format(rs['left'], rs['right']))
                 else:
-                    print "  {}".format(rs['name'])
-                    print "    fastq = {}\n".format(rs['left'])
+                    print("  {}".format(rs['name']))
+                    print("    fastq = {}\n".format(rs['left']))
 
 # Verify that the SampleCollection is consistent
 
@@ -326,7 +331,7 @@ referenced in conditions should exist, all samples or conditions referenced in c
                 if not self.findSample(s):
                     good = False
                     if verbose:
-                        print "Condition {} contains non-existent sample {}.".format(c['name'], s)
+                        print("Condition {} contains non-existent sample {}.".format(c['name'], s))
 
         ## Check samples or conditions in contrasts
         for c in self.contrasts:
@@ -335,23 +340,23 @@ referenced in conditions should exist, all samples or conditions referenced in c
             if not (self.findSample(ctrl) or self.findCondition(ctrl)):
                 good = False
                 if verbose:
-                    print "Contrast {}^{} contains non-existent sample or condition {}.".format(ctrl, test, ctrl)
+                    print("Contrast {}^{} contains non-existent sample or condition {}.".format(ctrl, test, ctrl))
             if not (self.findSample(test) or self.findCondition(test)):
                 good = False
                 if verbose:
-                    print "Contrast {}^{} contains non-existent sample or condition {}.".format(ctrl, test, test)
+                    print("Contrast {}^{} contains non-existent sample or condition {}.".format(ctrl, test, test))
         
         ## Check fastq files in readsets
         for rs in self.readsets:
             if not (os.path.isfile(rs['left']) or os.path.islink(rs['left'])):
                 good = False
                 if verbose:
-                    print "Readset {} references missing file {}".format(rs['name'], rs['left'])
+                    print("Readset {} references missing file {}".format(rs['name'], rs['left']))
             if rs['paired']:
                 if not (os.path.isfile(rs['right']) or os.path.islink(rs['left'])):
                     good = False
                     if verbose:
-                        print "Readset {} references missing file {}".format(rs['name'], rs['right'])
+                        print("Readset {} references missing file {}".format(rs['name'], rs['right']))
         return good
 
 # Using the collection as an iterator over (good) readsets
@@ -374,5 +379,5 @@ if __name__ == "__main__":
     conf.read(sys.argv[1])
     sc = SampleCollection(conf)
     sc.describe()
-    print sc.verify()
+    print(sc.verify())
     sc.showSamples()

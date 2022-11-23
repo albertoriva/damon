@@ -68,7 +68,10 @@ class PP(TableCell):
     """Cell showing value and percentage of total, as 'xx (xx.xx%)', right-aligned."""
 
     def __init__(self, v, div):
-        pct = 100.0 * float(v) / float(div)
+        if div:
+            pct = 100.0 * float(v) / float(div)
+        else:
+            pct = 0
         self.value = "{:,} ({:.3f}%)".format(int(v), pct)
 
     def toHTML(self, cls=""):
@@ -78,7 +81,10 @@ class PP0(TableCell):
     """Cell showing value and percentage of total, as 'xx (xx%)', right-aligned."""
 
     def __init__(self, v, div):
-        pct = 100.0 * float(v) / float(div)
+        if div:
+            pct = 100.0 * float(v) / float(div)
+        else:
+            pct = 0
         self.value = "{:,} ({}%)".format(int(v), int(pct))
 
     def toHTML(self, cls=""):
@@ -100,6 +106,24 @@ class A(TableCell):
     def toHTML(self, cls=""):
         return self.printCell("<A href='{}' target='{}'>{}</A>".format(self.href, self.target, self.value), cls=cls + " acenter")
 
+class AD(TableCell):
+    """Anchor cell, but includes number of rows in the file, printed as with D. Cell is right aligned."""
+    href = ""
+    target = "_blank"
+    nrows = 0
+
+    def __init__(self, href, nrows, text=None, target='_blank'):
+        self.href = href
+        self.target = target
+        self.nrows = nrows
+        if text:
+            self.value = text
+        else:
+            self.value = href
+
+    def toHTML(self, cls=""):
+        return self.printCell("<A href='{}' target='{}'>{}</A> ({:,})".format(self.href, self.target, self.value, self.nrows), cls=cls + " aright")
+    
 class R(TableCell):
     """Text cell, printed as-is, right aligned."""
 
@@ -463,5 +487,5 @@ def test():
     ta.addRowHeader("Total")
     ta.addRow(['four', 'five', 'six'])
     ta.toHTML(sys.stdout)
-    print ta.ncols
-    print ta.hasRowHeader
+    print(ta.ncols)
+    print(ta.hasRowHeader)
